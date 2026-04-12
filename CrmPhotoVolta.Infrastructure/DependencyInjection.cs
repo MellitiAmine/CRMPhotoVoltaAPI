@@ -44,8 +44,7 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
-        var coreConnection = configuration.GetConnectionString("crmPhotoVoltaDatabase")
-            ?? throw new InvalidOperationException("Connection string 'crmPhotoVoltaDatabase' is missing.");
+        var coreConnection = PostgresConnectionStringResolver.Resolve(configuration);
 
         services.AddDbContext<CoreDbContext>(options =>
         {

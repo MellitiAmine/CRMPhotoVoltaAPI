@@ -1,0 +1,14 @@
+**/.git
+**/.vs
+**/bin
+**/obj
+**/out
+**/publish
+**/*.user
+**/*.suo
+**/TestResults
+**/.idea
+**/node_modules
+**/.env
+**/.env.*
+**/uploads
