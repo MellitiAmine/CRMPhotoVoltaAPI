@@ -94,7 +94,7 @@ public sealed class DatabaseMaintenanceController : ControllerBase
         return CryptographicOperations.FixedTimeEquals(ha, hb);
     }
 
-    private static IActionResult ToActionResult(DatabaseMaintenanceApplyResult result)
+    private IActionResult ToActionResult(DatabaseMaintenanceApplyResult result)
     {
         if (result.Success)
             return Ok(ApiResponse.Ok(result));
