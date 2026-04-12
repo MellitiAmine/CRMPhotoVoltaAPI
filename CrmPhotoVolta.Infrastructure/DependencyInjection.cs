@@ -1,5 +1,6 @@
 using System.Text;
 using CrmPhotoVolta.Application.Abstractions;
+using CrmPhotoVolta.Application.Maintenance;
 using CrmPhotoVolta.Application.Auth;
 using CrmPhotoVolta.Application.Crm.Calendar;
 using CrmPhotoVolta.Application.Crm.Clients;
@@ -18,7 +19,6 @@ using CrmPhotoVolta.Application.Crm.Settings;
 using CrmPhotoVolta.Application.Permissions;
 using CrmPhotoVolta.Application.Platform;
 using CrmPhotoVolta.Application.Platform.Auth;
-using CrmPhotoVolta.Application.Platform.DatabaseMaintenance;
 using CrmPhotoVolta.Application.Platform.Societies;
 using CrmPhotoVolta.Application.Platform.Subscriptions;
 using CrmPhotoVolta.Application.Roles;
@@ -68,7 +68,8 @@ public static class DependencyInjection
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
         services.Configure<PlatformJwtOptions>(configuration.GetSection(PlatformJwtOptions.SectionName));
         services.Configure<PlatformSeedOptions>(configuration.GetSection(PlatformSeedOptions.SectionName));
-        services.Configure<DatabaseMaintenanceOptions>(configuration.GetSection(DatabaseMaintenanceOptions.SectionName));
+        services.Configure<MaintenanceOptions>(configuration.GetSection(MaintenanceOptions.SectionName));
+        services.AddScoped<IDatabaseMaintenanceService, DatabaseMaintenanceService>();
         services.AddSingleton<IJwtTokenService, JwtTokenService>();
         services.AddSingleton<IPlatformJwtTokenService, PlatformJwtTokenService>();
 
@@ -103,7 +104,6 @@ public static class DependencyInjection
         services.AddScoped<IDocumentService, DocumentService>();
         services.AddScoped<IReportService, ReportService>();
         services.AddScoped<ISocietySettingsService, SocietySettingsService>();
-        services.AddScoped<IDatabaseMaintenanceService, DatabaseMaintenanceService>();
 
         var tenantJwt = configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
             ?? throw new InvalidOperationException("Jwt configuration section is missing.");

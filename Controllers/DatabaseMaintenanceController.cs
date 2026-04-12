@@ -1,82 +1,106 @@
+using System.Security.Cryptography;
+using System.Text;
 using CrmPhotoVolta.Application.Common;
-using CrmPhotoVolta.Application.Platform.DatabaseMaintenance;
-using CrmPhotoVolta.Infrastructure.Seeding;
-using CrmPhotoVolta.Infrastructure.Services;
+using CrmPhotoVolta.Application.Maintenance;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
 namespace CrmPhotoVoltaApis.Controllers;
 
-/// <summary>One-off production bootstrap: migrations + seed. Guarded by <c>X-Maintenance-Key</c> and <c>DatabaseMaintenance:ApiKey</c>.</summary>
+/// <summary>
+/// Secured by <c>X-Maintenance-Secret</c> (see <see cref="MaintenanceOptions.Secret"/> / <c>Maintenance__Secret</c>).
+/// Call only over HTTPS in production; rotate the secret after bootstrap.
+/// </summary>
 [ApiController]
 [AllowAnonymous]
-[Route("api/v1/system/database")]
+[Route("api/v1/maintenance")]
 public sealed class DatabaseMaintenanceController : ControllerBase
 {
+    private readonly IOptions<MaintenanceOptions> _options;
     private readonly IDatabaseMaintenanceService _maintenance;
-    private readonly IOptions<DatabaseMaintenanceOptions> _options;
 
     public DatabaseMaintenanceController(
-        IDatabaseMaintenanceService maintenance,
-        IOptions<DatabaseMaintenanceOptions> options)
+        IOptions<MaintenanceOptions> options,
+        IDatabaseMaintenanceService maintenance)
     {
-        _maintenance = maintenance;
         _options = options;
+        _maintenance = maintenance;
     }
 
-    /// <summary>Apply all pending EF migrations, then run catalog / platform / demo seed (same as startup when DB is up).</summary>
+    /// <summary>Apply pending EF Core migrations for core, app, and platform schemas.</summary>
+    [HttpPost("migrate")]
+    public async Task<IActionResult> Migrate(
+        [FromHeader(Name = "X-Maintenance-Secret")] string? secret,
+        CancellationToken cancellationToken)
+    {
+        if (!IsAuthorized(secret))
+            return MaintenanceRejected();
+
+        var result = await _maintenance.MigrateAllAsync(cancellationToken);
+        return ToActionResult(result);
+    }
+
+    /// <summary>Run catalog/platform/demo seeding (same pipeline as startup when DB is up).</summary>
+    [HttpPost("seed")]
+    public async Task<IActionResult> Seed(
+        [FromHeader(Name = "X-Maintenance-Secret")] string? secret,
+        CancellationToken cancellationToken)
+    {
+        if (!IsAuthorized(secret))
+            return MaintenanceRejected();
+
+        var result = await _maintenance.SeedAllAsync(cancellationToken);
+        return ToActionResult(result);
+    }
+
+    /// <summary>Migrate then seed in one call.</summary>
     [HttpPost("migrate-and-seed")]
     public async Task<IActionResult> MigrateAndSeed(
-        [FromHeader(Name = "X-Maintenance-Key")] string? maintenanceKey,
+        [FromHeader(Name = "X-Maintenance-Secret")] string? secret,
         CancellationToken cancellationToken)
     {
-        if (!EnsureKey(maintenanceKey, out var denied))
-            return denied!;
+        if (!IsAuthorized(secret))
+            return MaintenanceRejected();
 
         var result = await _maintenance.MigrateAndSeedAsync(cancellationToken);
-        if (!result.Success)
-            return StatusCode(500, ApiResponse.Fail("DATABASE_MAINTENANCE_FAILED", result.Error ?? "Unknown error", result));
-
-        return Ok(ApiResponse.Ok(result));
+        return ToActionResult(result);
     }
 
-    /// <summary>Run seed pipeline only (no migrations). Use when schema is already migrated.</summary>
-    [HttpPost("seed")]
-    public async Task<IActionResult> SeedOnly(
-        [FromHeader(Name = "X-Maintenance-Key")] string? maintenanceKey,
-        CancellationToken cancellationToken)
+    private IActionResult MaintenanceRejected()
     {
-        if (!EnsureKey(maintenanceKey, out var denied))
-            return denied!;
+        var configured = !string.IsNullOrWhiteSpace(_options.Value.Secret);
+        if (!configured)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                ApiResponse.Fail("MAINTENANCE_DISABLED", "Maintenance API is disabled (no Maintenance:Secret configured)."));
+        }
 
-        var result = await _maintenance.SeedOnlyAsync(cancellationToken);
-        if (!result.Success)
-            return StatusCode(500, ApiResponse.Fail("DATABASE_MAINTENANCE_FAILED", result.Error ?? "Unknown error", result));
-
-        return Ok(ApiResponse.Ok(result));
+        return Unauthorized(ApiResponse.Fail("MAINTENANCE_UNAUTHORIZED", "Invalid or missing X-Maintenance-Secret header."));
     }
 
-    private bool EnsureKey(string? maintenanceKey, out IActionResult? denied)
+    private bool IsAuthorized(string? providedSecret)
     {
-        denied = null;
-        var expected = _options.Value.ApiKey;
+        var expected = _options.Value.Secret ?? string.Empty;
         if (string.IsNullOrWhiteSpace(expected))
-        {
-            denied = StatusCode(
-                StatusCodes.Status403Forbidden,
-                ApiResponse.Fail(
-                    "MAINTENANCE_DISABLED",
-                    "Set DatabaseMaintenance__ApiKey (or DatabaseMaintenance:ApiKey) to enable this endpoint."));
             return false;
-        }
-
-        if (!DatabaseMaintenanceService.ApiKeyMatches(expected, maintenanceKey))
-        {
-            denied = Unauthorized(ApiResponse.Fail("MAINTENANCE_UNAUTHORIZED", "Invalid or missing X-Maintenance-Key header."));
+        if (string.IsNullOrWhiteSpace(providedSecret))
             return false;
-        }
 
-        return true;
+        var ha = SHA256.HashData(Encoding.UTF8.GetBytes(providedSecret));
+        var hb = SHA256.HashData(Encoding.UTF8.GetBytes(expected));
+        return CryptographicOperations.FixedTimeEquals(ha, hb);
+    }
+
+    private static IActionResult ToActionResult(DatabaseMaintenanceApplyResult result)
+    {
+        if (result.Success)
+            return Ok(ApiResponse.Ok(result));
+
+        return StatusCode(
+            StatusCodes.Status500InternalServerError,
+            ApiResponse.Fail("MAINTENANCE_FAILED", result.Error ?? "Maintenance operation failed.", result));
     }
 }

@@ -2,19 +2,15 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CrmPhotoVolta.Application;
 using CrmPhotoVolta.Application.Common;
+using CrmPhotoVolta.Application.Maintenance;
 using CrmPhotoVolta.Infrastructure;
-using CrmPhotoVolta.Infrastructure.Data.Core;
-using CrmPhotoVolta.Infrastructure.Data.Platform;
-using CrmPhotoVolta.Infrastructure.Seeding;
 using CrmPhotoVoltaApis.Middleware;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -101,51 +97,9 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
-    var coreDb = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
-    var platformDb = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
-
-    // Migrations are not applied at runtime — run manually per context, e.g.:
-    // dotnet ef database update --project CrmPhotoVolta.Infrastructure --context CoreDbContext --startup-project CrmPhotoVoltaApis
-    // (repeat for AppDbContext, PlatformDbContext)
-    try
-    {
-        var canConnect = await coreDb.Database.CanConnectAsync(CancellationToken.None);
-        if (!canConnect)
-        {
-            logger.LogWarning(
-                "PostgreSQL is not reachable (CanConnectAsync=false). API will start; apply migrations and fix connectivity, then restart.");
-        }
-        else
-        {
-            logger.LogInformation("PostgreSQL connectivity check succeeded.");
-
-            await DatabaseSeeder.EnsureSeedAsync(coreDb, CancellationToken.None);
-
-            await PlatformDatabaseSeeder.EnsureSeedAsync(platformDb, CancellationToken.None);
-
-            var platformSeed = scope.ServiceProvider.GetRequiredService<IOptions<PlatformSeedOptions>>().Value;
-            if (platformSeed.Enabled)
-            {
-                await PlatformDatabaseSeeder.EnsureSuperAdminUserAsync(
-                    platformDb,
-                    platformSeed.PlatformAdminEmail,
-                    platformSeed.PlatformAdminPassword,
-                    CancellationToken.None);
-            }
-
-            await PlatformDemoSeeder.RemoveLegacyTenantUserMatchingPlatformEmailAsync(
-                coreDb,
-                platformSeed.PlatformAdminEmail,
-                CancellationToken.None);
-
-            await PlatformDemoSeeder.SeedAsync(coreDb, platformSeed, CancellationToken.None);
-        }
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex,
-            "Database connectivity check or seeding failed. API will start; ensure DB is reachable and migrations are applied (`dotnet ef database update`), then restart.");
-    }
+    var maintenance = scope.ServiceProvider.GetRequiredService<IDatabaseMaintenanceService>();
+    // Migrations: POST /api/v1/maintenance/migrate-and-seed with X-Maintenance-Secret, or dotnet ef database update.
+    await maintenance.RunStartupConnectivityAndSeedAsync(logger, CancellationToken.None);
 }
 
 app.MapGet("/api/health", () => Results.Json(new { status = "ok" }))
