@@ -3,7 +3,6 @@ using System.Text.Json.Serialization;
 using CrmPhotoVolta.Application;
 using CrmPhotoVolta.Application.Common;
 using CrmPhotoVolta.Infrastructure;
-using CrmPhotoVolta.Infrastructure.Data.App;
 using CrmPhotoVolta.Infrastructure.Data.Core;
 using CrmPhotoVolta.Infrastructure.Data.Platform;
 using CrmPhotoVolta.Infrastructure.Seeding;
@@ -14,6 +13,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -60,73 +60,92 @@ builder.Services.AddControllers()
 
 builder.Services.AddFluentValidationAutoValidation();
 
-if (builder.Environment.IsDevelopment())
+// Swagger in all environments (same as Development). Re-enable the guard for Production-only docs if needed.
+// if (builder.Environment.IsDevelopment())
+// {
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
 {
-    builder.Services.AddEndpointsApiExplorer();
-    builder.Services.AddSwaggerGen(c =>
+    c.SwaggerDoc("v1", new() { Title = "CRM PhotoVolta API", Version = "v1" });
+    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
     {
-        c.SwaggerDoc("v1", new() { Title = "CRM PhotoVolta API", Version = "v1" });
-        c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-        {
-            Description =
-                "JWT from tenant login POST /api/v1/auth/login (audience CrmPhotoVoltaClients, claim society_id) " +
-                "or platform login POST /api/v1/platform/auth/login (audience CrmPhotoVoltaPlatform). " +
-                "Use: Authorization: Bearer {token}",
-            Name = "Authorization",
-            In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-            Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
-            Scheme = JwtBearerDefaults.AuthenticationScheme,
-            BearerFormat = "JWT"
-        });
-        c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
-        {
-            {
-                new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-                {
-                    Reference = new Microsoft.OpenApi.Models.OpenApiReference
-                    {
-                        Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
-                        Id = "Bearer"
-                    }
-                },
-                Array.Empty<string>()
-            }
-        });
+        Description =
+            "JWT from tenant login POST /api/v1/auth/login (audience CrmPhotoVoltaClients, claim society_id) " +
+            "or platform login POST /api/v1/platform/auth/login (audience CrmPhotoVoltaPlatform). " +
+            "Use: Authorization: Bearer {token}",
+        Name = "Authorization",
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+        Scheme = JwtBearerDefaults.AuthenticationScheme,
+        BearerFormat = "JWT"
     });
-}
+    c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    {
+        {
+            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            {
+                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                {
+                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
+// }
 
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
+    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
     var coreDb = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
-    var appDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     var platformDb = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
 
-    await coreDb.Database.MigrateAsync();
-    await appDb.Database.MigrateAsync();
-    await platformDb.Database.MigrateAsync();
-
-    await DatabaseSeeder.EnsureSeedAsync(coreDb, CancellationToken.None);
-
-    await PlatformDatabaseSeeder.EnsureSeedAsync(platformDb, CancellationToken.None);
-
-    var platformSeed = scope.ServiceProvider.GetRequiredService<IOptions<PlatformSeedOptions>>().Value;
-    if (platformSeed.Enabled)
+    // Migrations are not applied at runtime — run manually per context, e.g.:
+    // dotnet ef database update --project CrmPhotoVolta.Infrastructure --context CoreDbContext --startup-project CrmPhotoVoltaApis
+    // (repeat for AppDbContext, PlatformDbContext)
+    try
     {
-        await PlatformDatabaseSeeder.EnsureSuperAdminUserAsync(
-            platformDb,
-            platformSeed.PlatformAdminEmail,
-            platformSeed.PlatformAdminPassword,
-            CancellationToken.None);
+        var canConnect = await coreDb.Database.CanConnectAsync(CancellationToken.None);
+        if (!canConnect)
+        {
+            logger.LogWarning(
+                "PostgreSQL is not reachable (CanConnectAsync=false). API will start; apply migrations and fix connectivity, then restart.");
+        }
+        else
+        {
+            logger.LogInformation("PostgreSQL connectivity check succeeded.");
+
+            await DatabaseSeeder.EnsureSeedAsync(coreDb, CancellationToken.None);
+
+            await PlatformDatabaseSeeder.EnsureSeedAsync(platformDb, CancellationToken.None);
+
+            var platformSeed = scope.ServiceProvider.GetRequiredService<IOptions<PlatformSeedOptions>>().Value;
+            if (platformSeed.Enabled)
+            {
+                await PlatformDatabaseSeeder.EnsureSuperAdminUserAsync(
+                    platformDb,
+                    platformSeed.PlatformAdminEmail,
+                    platformSeed.PlatformAdminPassword,
+                    CancellationToken.None);
+            }
+
+            await PlatformDemoSeeder.RemoveLegacyTenantUserMatchingPlatformEmailAsync(
+                coreDb,
+                platformSeed.PlatformAdminEmail,
+                CancellationToken.None);
+
+            await PlatformDemoSeeder.SeedAsync(coreDb, platformSeed, CancellationToken.None);
+        }
     }
-
-    await PlatformDemoSeeder.RemoveLegacyTenantUserMatchingPlatformEmailAsync(
-        coreDb,
-        platformSeed.PlatformAdminEmail,
-        CancellationToken.None);
-
-    await PlatformDemoSeeder.SeedAsync(coreDb, platformSeed, CancellationToken.None);
+    catch (Exception ex)
+    {
+        logger.LogError(ex,
+            "Database connectivity check or seeding failed. API will start; ensure DB is reachable and migrations are applied (`dotnet ef database update`), then restart.");
+    }
 }
 
 app.MapGet("/api/health", () => Results.Json(new { status = "ok" }))
@@ -134,12 +153,13 @@ app.MapGet("/api/health", () => Results.Json(new { status = "ok" }))
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-    app.UseHttpsRedirection();
-}
+// Swagger UI + HTTPS redirect in all environments (same as Development). Comment the guard to match prod to dev.
+// if (app.Environment.IsDevelopment())
+// {
+app.UseSwagger();
+app.UseSwaggerUI();
+app.UseHttpsRedirection();
+// }
 
 var uploadsRoot = Path.Combine(builder.Environment.ContentRootPath, "uploads");
 Directory.CreateDirectory(uploadsRoot);
