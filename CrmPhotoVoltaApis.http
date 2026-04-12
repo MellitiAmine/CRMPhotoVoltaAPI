@@ -1,0 +1,6 @@
+@CrmPhotoVoltaApis_HostAddress = http://localhost:5172
+
+GET {{CrmPhotoVoltaApis_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
