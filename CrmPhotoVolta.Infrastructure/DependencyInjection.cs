@@ -1,10 +1,20 @@
 using System.Text;
 using CrmPhotoVolta.Application.Abstractions;
 using CrmPhotoVolta.Application.Auth;
+using CrmPhotoVolta.Application.Crm.Calendar;
 using CrmPhotoVolta.Application.Crm.Clients;
+using CrmPhotoVolta.Application.Crm.Dashboard;
 using CrmPhotoVolta.Application.Crm.Deals;
+using CrmPhotoVolta.Application.Crm.Documents;
+using CrmPhotoVolta.Application.Crm.Installations;
 using CrmPhotoVolta.Application.Crm.Leads;
+using CrmPhotoVolta.Application.Crm.Me;
+using CrmPhotoVolta.Application.Crm.Notifications;
+using CrmPhotoVolta.Application.Crm.Pipeline;
 using CrmPhotoVolta.Application.Crm.Projects;
+using CrmPhotoVolta.Application.Crm.Quotes;
+using CrmPhotoVolta.Application.Crm.Reports;
+using CrmPhotoVolta.Application.Crm.Settings;
 using CrmPhotoVolta.Application.Permissions;
 using CrmPhotoVolta.Application.Platform;
 using CrmPhotoVolta.Application.Platform.Auth;
@@ -81,6 +91,17 @@ public static class DependencyInjection
         services.AddScoped<IClientService, ClientService>();
         services.AddScoped<IProjectService, ProjectService>();
         services.AddScoped<IDealService, DealService>();
+
+        services.AddScoped<IDashboardService, DashboardService>();
+        services.AddScoped<IQuoteService, QuoteService>();
+        services.AddScoped<IPipelineStageService, PipelineStageService>();
+        services.AddScoped<IInstallationWorkflowService, InstallationWorkflowService>();
+        services.AddScoped<IMeWorkspaceService, MeWorkspaceService>();
+        services.AddScoped<ICalendarQueryService, CalendarQueryService>();
+        services.AddScoped<INotificationService, CrmNotificationService>();
+        services.AddScoped<IDocumentService, DocumentService>();
+        services.AddScoped<IReportService, ReportService>();
+        services.AddScoped<ISocietySettingsService, SocietySettingsService>();
 
         var tenantJwt = configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
             ?? throw new InvalidOperationException("Jwt configuration section is missing.");

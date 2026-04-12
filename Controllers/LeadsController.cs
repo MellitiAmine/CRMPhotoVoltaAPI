@@ -82,4 +82,59 @@ public sealed class LeadsController : TenantCrmControllerBase
         var created = await _leads.AddActivityAsync(societyId, id, actorId, request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(created));
     }
+
+    [HttpPost("{id:guid}/assign")]
+    public async Task<IActionResult> Assign(Guid id, [FromBody] AssignLeadRequest request, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var updated = await _leads.AssignAsync(societyId, id, actorId, request, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
+    }
+
+    [HttpPost("{id:guid}/convert")]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Convert(Guid id, [FromBody] ConvertLeadRequest request, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var result = await _leads.ConvertAsync(societyId, id, actorId, request, cancellationToken);
+        return Ok(ApiResponse.Ok(result));
+    }
+
+    [HttpPost("{id:guid}/mark-won")]
+    public async Task<IActionResult> MarkWon(Guid id, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var updated = await _leads.MarkWonAsync(societyId, id, actorId, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
+    }
+
+    [HttpPost("{id:guid}/mark-lost")]
+    public async Task<IActionResult> MarkLost(Guid id, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var updated = await _leads.MarkLostAsync(societyId, id, actorId, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
+    }
+
+    [HttpPost("{id:guid}/notes")]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status201Created)]
+    public async Task<IActionResult> AddNote(Guid id, [FromBody] AddLeadNoteRequest request, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var created = await _leads.AddNoteAsync(societyId, id, actorId, request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(created));
+    }
+
+    [HttpGet("{id:guid}/timeline")]
+    public async Task<IActionResult> Timeline(Guid id, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var list = await _leads.GetTimelineAsync(societyId, id, cancellationToken);
+        return Ok(ApiResponse.Ok(list));
+    }
 }

@@ -16,6 +16,10 @@ public class Project : SocietyScopedEntity
     public DateOnly? StartDate { get; set; }
     public DateOnly? EndDate { get; set; }
 
+    public Guid? ManagerUserId { get; set; }
+    public Guid? TechnicianUserId { get; set; }
+    public int ProgressPercent { get; set; }
+
     public ICollection<ProjectStageTracking> StageTrackings { get; set; } = new List<ProjectStageTracking>();
     public ICollection<CrmTask> Tasks { get; set; } = new List<CrmTask>();
     public ICollection<Installation> Installations { get; set; } = new List<Installation>();

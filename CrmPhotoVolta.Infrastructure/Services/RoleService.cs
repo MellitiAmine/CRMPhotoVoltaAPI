@@ -1,4 +1,5 @@
 using CrmPhotoVolta.Application.Exceptions;
+using CrmPhotoVolta.Application.Permissions.Dtos;
 using CrmPhotoVolta.Application.Roles;
 using CrmPhotoVolta.Application.Roles.Dtos;
 using CrmPhotoVolta.Domain.Core;
@@ -93,6 +94,62 @@ public sealed class RoleService : IRoleService
             throw new AppException("ROLE_IN_USE", "Role is assigned to users.", 409);
 
         role.IsDeleted = true;
+        role.UpdatedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<PermissionDto>> GetPermissionsAsync(
+        Guid societyId,
+        Guid roleId,
+        CancellationToken cancellationToken = default)
+    {
+        _ = await _db.Roles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == roleId && x.SocietyId == societyId && !x.IsDeleted, cancellationToken)
+            ?? throw new AppException("ROLE_NOT_FOUND", "Role not found.", 404);
+
+        return await _db.RolePermissions.AsNoTracking()
+            .Where(x => x.RoleId == roleId)
+            .Include(x => x.Permission)
+            .Select(x => new PermissionDto
+            {
+                Id = x.Permission!.Id,
+                Code = x.Permission.Code,
+                Description = x.Permission.Description
+            })
+            .OrderBy(x => x.Code)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task ReplacePermissionsAsync(
+        Guid societyId,
+        Guid roleId,
+        ReplaceRolePermissionsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var role = await _db.Roles.FirstOrDefaultAsync(
+            x => x.Id == roleId && x.SocietyId == societyId && !x.IsDeleted,
+            cancellationToken)
+            ?? throw new AppException("ROLE_NOT_FOUND", "Role not found.", 404);
+
+        if (role.IsSystemRole)
+            throw new AppException("ROLE_PROTECTED", "System roles cannot be modified this way.", 409);
+
+        var existing = await _db.RolePermissions.Where(x => x.RoleId == roleId).ToListAsync(cancellationToken);
+        _db.RolePermissions.RemoveRange(existing);
+
+        foreach (var pid in request.PermissionIds.Distinct())
+        {
+            if (!await _db.Permissions.AnyAsync(x => x.Id == pid && !x.IsDeleted, cancellationToken))
+                continue;
+
+            _db.RolePermissions.Add(new RolePermission
+            {
+                RoleId = roleId,
+                PermissionId = pid,
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+        }
+
         role.UpdatedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
     }

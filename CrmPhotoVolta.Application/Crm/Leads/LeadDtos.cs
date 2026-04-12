@@ -59,3 +59,35 @@ public sealed class AddLeadActivityRequest
     public string Type { get; init; } = string.Empty;
     public string? Notes { get; init; }
 }
+
+public sealed class AssignLeadRequest
+{
+    public Guid UserId { get; init; }
+}
+
+public sealed class ConvertLeadRequest
+{
+    public bool CreateDeal { get; init; }
+    public string? DealTitle { get; init; }
+}
+
+public sealed class ConvertLeadResultDto
+{
+    public required LeadDto Lead { get; init; }
+    public Guid ClientId { get; init; }
+    public Guid? DealId { get; init; }
+}
+
+public sealed class AddLeadNoteRequest
+{
+    public string Body { get; init; } = string.Empty;
+}
+
+public sealed class LeadTimelineEntryDto
+{
+    public string Kind { get; init; } = string.Empty;
+    public DateTimeOffset At { get; init; }
+    public string Title { get; init; } = string.Empty;
+    public string? Detail { get; init; }
+    public Guid? RefId { get; init; }
+}

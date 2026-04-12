@@ -190,6 +190,200 @@ public sealed class LeadService : ILeadService
         };
     }
 
+    public async Task<LeadDto> AssignAsync(
+        Guid societyId,
+        Guid leadId,
+        Guid actorUserId,
+        AssignLeadRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserInSocietyAsync(societyId, request.UserId, cancellationToken);
+
+        var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
+
+        lead.AssignedToUserId = request.UserId;
+        lead.UpdatedAt = DateTimeOffset.UtcNow;
+
+        _app.LeadActivities.Add(new LeadActivity
+        {
+            SocietyId = societyId,
+            LeadId = leadId,
+            Type = "Assignment",
+            Notes = $"Assigned to user {request.UserId}",
+            CreatedByUserId = actorUserId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedById = actorUserId
+        });
+
+        await _app.SaveChangesAsync(cancellationToken);
+        return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
+    }
+
+    public async Task<ConvertLeadResultDto> ConvertAsync(
+        Guid societyId,
+        Guid leadId,
+        Guid actorUserId,
+        ConvertLeadRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
+
+        if (lead.Status == "Converted")
+            throw new AppException("LEAD_ALREADY_CONVERTED", "Lead is already converted.", 409);
+
+        var client = new Client
+        {
+            SocietyId = societyId,
+            Name = lead.Name,
+            Phone = lead.Phone,
+            Email = lead.Email,
+            Address = lead.Address,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        _app.Clients.Add(client);
+        await _app.SaveChangesAsync(cancellationToken);
+
+        Guid? dealId = null;
+        if (request.CreateDeal)
+        {
+            var title = string.IsNullOrWhiteSpace(request.DealTitle) ? $"Deal — {lead.Name}" : request.DealTitle!.Trim();
+            var deal = new Deal
+            {
+                SocietyId = societyId,
+                LeadId = leadId,
+                Title = title,
+                Stage = "New",
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            _app.Deals.Add(deal);
+            await _app.SaveChangesAsync(cancellationToken);
+            dealId = deal.Id;
+        }
+
+        lead.Status = "Converted";
+        lead.UpdatedAt = DateTimeOffset.UtcNow;
+
+        _app.LeadActivities.Add(new LeadActivity
+        {
+            SocietyId = societyId,
+            LeadId = leadId,
+            Type = "Converted",
+            Notes = $"Client created: {client.Id}",
+            CreatedByUserId = actorUserId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedById = actorUserId
+        });
+
+        await _app.SaveChangesAsync(cancellationToken);
+
+        return new ConvertLeadResultDto
+        {
+            Lead = Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken)),
+            ClientId = client.Id,
+            DealId = dealId
+        };
+    }
+
+    public async Task<LeadDto> MarkWonAsync(Guid societyId, Guid leadId, Guid actorUserId, CancellationToken cancellationToken = default)
+    {
+        var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
+
+        lead.Status = "Won";
+        lead.UpdatedAt = DateTimeOffset.UtcNow;
+
+        _app.LeadActivities.Add(new LeadActivity
+        {
+            SocietyId = societyId,
+            LeadId = leadId,
+            Type = "StatusChange",
+            Notes = "Marked as Won",
+            CreatedByUserId = actorUserId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedById = actorUserId
+        });
+
+        await _app.SaveChangesAsync(cancellationToken);
+        return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
+    }
+
+    public async Task<LeadDto> MarkLostAsync(Guid societyId, Guid leadId, Guid actorUserId, CancellationToken cancellationToken = default)
+    {
+        var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
+
+        lead.Status = "Lost";
+        lead.UpdatedAt = DateTimeOffset.UtcNow;
+
+        _app.LeadActivities.Add(new LeadActivity
+        {
+            SocietyId = societyId,
+            LeadId = leadId,
+            Type = "StatusChange",
+            Notes = "Marked as Lost",
+            CreatedByUserId = actorUserId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedById = actorUserId
+        });
+
+        await _app.SaveChangesAsync(cancellationToken);
+        return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
+    }
+
+    public async Task<LeadActivityDto> AddNoteAsync(
+        Guid societyId,
+        Guid leadId,
+        Guid actorUserId,
+        AddLeadNoteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.Body))
+            throw new AppException("VALIDATION_ERROR", "Note body is required.", 400);
+
+        return await AddActivityAsync(societyId, leadId, actorUserId,
+            new AddLeadActivityRequest { Type = "Note", Notes = request.Body.Trim() },
+            cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<LeadTimelineEntryDto>> GetTimelineAsync(
+        Guid societyId,
+        Guid leadId,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureLeadAsync(societyId, leadId, cancellationToken);
+
+        var activities = await _app.LeadActivities.AsNoTracking()
+            .Where(x => x.LeadId == leadId && x.SocietyId == societyId)
+            .OrderByDescending(x => x.CreatedAt)
+            .Select(x => new LeadTimelineEntryDto
+            {
+                Kind = "activity",
+                At = x.CreatedAt,
+                Title = x.Type,
+                Detail = x.Notes,
+                RefId = x.Id
+            })
+            .ToListAsync(cancellationToken);
+
+        var quotes = await _app.Quotes.AsNoTracking()
+            .Where(x => x.SocietyId == societyId && x.LeadId == leadId)
+            .OrderByDescending(x => x.CreatedAt)
+            .Select(x => new LeadTimelineEntryDto
+            {
+                Kind = "quote",
+                At = x.CreatedAt,
+                Title = $"Quote {x.QuoteNumber}",
+                Detail = $"{x.Status} — {x.TotalAmount} {x.Currency}",
+                RefId = x.Id
+            })
+            .ToListAsync(cancellationToken);
+
+        return activities.Concat(quotes).OrderByDescending(x => x.At).ToList();
+    }
+
     private async Task EnsureLeadAsync(Guid societyId, Guid leadId, CancellationToken cancellationToken)
     {
         if (!await _app.Leads.AnyAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken))

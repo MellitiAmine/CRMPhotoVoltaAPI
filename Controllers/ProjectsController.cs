@@ -63,4 +63,39 @@ public sealed class ProjectsController : TenantCrmControllerBase
         await _projects.DeleteAsync(societyId, id, cancellationToken);
         return Ok(ApiResponse.Ok(new { deleted = true }));
     }
+
+    [HttpGet("{id:guid}/overview")]
+    public async Task<IActionResult> Overview(Guid id, CancellationToken cancellationToken)
+    {
+        var data = await _projects.GetOverviewAsync(RequireSociety(), id, cancellationToken);
+        return Ok(ApiResponse.Ok(data));
+    }
+
+    [HttpGet("{id:guid}/progress")]
+    public async Task<IActionResult> Progress(Guid id, CancellationToken cancellationToken)
+    {
+        var data = await _projects.GetProgressAsync(RequireSociety(), id, cancellationToken);
+        return Ok(ApiResponse.Ok(data));
+    }
+
+    [HttpPost("{id:guid}/assign-technician")]
+    public async Task<IActionResult> AssignTechnician(Guid id, [FromBody] AssignProjectUserRequest request, CancellationToken cancellationToken)
+    {
+        var updated = await _projects.AssignTechnicianAsync(RequireSociety(), id, request, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
+    }
+
+    [HttpPost("{id:guid}/assign-manager")]
+    public async Task<IActionResult> AssignManager(Guid id, [FromBody] AssignProjectUserRequest request, CancellationToken cancellationToken)
+    {
+        var updated = await _projects.AssignManagerAsync(RequireSociety(), id, request, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
+    }
+
+    [HttpPatch("{id:guid}/progress")]
+    public async Task<IActionResult> PatchProgress(Guid id, [FromBody] PatchProjectProgressRequest request, CancellationToken cancellationToken)
+    {
+        var updated = await _projects.UpdateProgressAsync(RequireSociety(), id, request, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
+    }
 }

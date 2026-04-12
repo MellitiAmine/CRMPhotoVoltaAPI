@@ -5,6 +5,7 @@ using CrmPhotoVolta.Application.Exceptions;
 using CrmPhotoVolta.Application.Roles;
 using CrmPhotoVolta.Application.Roles.Dtos;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CrmPhotoVoltaApis.Controllers;
@@ -12,15 +13,13 @@ namespace CrmPhotoVoltaApis.Controllers;
 [ApiController]
 [Authorize(AuthenticationSchemes = AuthSchemes.TenantJwt)]
 [Route("api/v1/roles")]
-public sealed class RolesController : ControllerBase
+public sealed class RolesController : TenantCrmControllerBase
 {
     private readonly IRoleService _roles;
-    private readonly ITenantContext _tenant;
 
-    public RolesController(IRoleService roles, ITenantContext tenant)
+    public RolesController(ITenantContext tenant, IRoleService roles) : base(tenant)
     {
         _roles = roles;
-        _tenant = tenant;
     }
 
     [HttpGet]
@@ -56,10 +55,19 @@ public sealed class RolesController : ControllerBase
         return Ok(ApiResponse.Ok(new { deleted = true }));
     }
 
-    private Guid RequireSociety()
+    [HttpGet("{id:guid}/permissions")]
+    public async Task<IActionResult> GetPermissions(Guid id, CancellationToken cancellationToken)
     {
-        if (_tenant.CurrentSocietyId is { } sid)
-            return sid;
-        throw new AppException("TENANT_REQUIRED", "Society context is required (JWT claim society_id).", StatusCodes.Status403Forbidden);
+        var societyId = RequireSociety();
+        var list = await _roles.GetPermissionsAsync(societyId, id, cancellationToken);
+        return Ok(ApiResponse.Ok(list));
+    }
+
+    [HttpPut("{id:guid}/permissions")]
+    public async Task<IActionResult> ReplacePermissions(Guid id, [FromBody] ReplaceRolePermissionsRequest request, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        await _roles.ReplacePermissionsAsync(societyId, id, request, cancellationToken);
+        return Ok(ApiResponse.Ok(new { updated = true }));
     }
 }

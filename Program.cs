@@ -7,7 +7,9 @@ using CrmPhotoVolta.Infrastructure.Data.App;
 using CrmPhotoVolta.Infrastructure.Data.Core;
 using CrmPhotoVolta.Infrastructure.Data.Platform;
 using CrmPhotoVolta.Infrastructure.Seeding;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
 using CrmPhotoVoltaApis.Middleware;
 using FluentValidation.AspNetCore;
@@ -117,6 +119,14 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+var uploadsRoot = Path.Combine(builder.Environment.ContentRootPath, "uploads");
+Directory.CreateDirectory(uploadsRoot);
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(uploadsRoot),
+    RequestPath = "/uploads"
+});
 
 app.UseAuthentication();
 app.UseMiddleware<TenantResolutionMiddleware>();

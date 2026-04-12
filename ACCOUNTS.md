@@ -42,6 +42,27 @@ All routes below require the **tenant** token. Data is stored in schema **`app`*
 | **Deals** | `GET/POST /api/v1/deals`, `GET/PUT/DELETE /api/v1/deals/{id}` (optional `leadId`, assignee must be a user of the society) |
 | **Projects** | `GET/POST /api/v1/projects`, `GET/PUT/DELETE /api/v1/projects/{id}` — `GET` supports `?clientId=` filter; `clientId` / `dealId` must belong to the same society |
 
+## CRM PRO (tenant JWT)
+
+Same auth as above. New or extended routes for dashboard, quotes, pipeline, installations, mobile “me”, calendar, notifications, documents, reports, society settings, and role permissions.
+
+| Area | Routes |
+|------|--------|
+| **Dashboard** | `GET /api/v1/dashboard/overview`, `GET /api/v1/dashboard/kpis`, `GET /api/v1/dashboard/revenue`, `GET /api/v1/dashboard/pipeline`, `GET /api/v1/dashboard/projects` |
+| **Leads (lifecycle)** | `POST /api/v1/leads/{id}/assign`, `POST /api/v1/leads/{id}/convert`, `POST /api/v1/leads/{id}/mark-won`, `POST /api/v1/leads/{id}/mark-lost`, `POST /api/v1/leads/{id}/notes`, `GET /api/v1/leads/{id}/timeline` (plus existing CRUD and `…/activities`) |
+| **Quotes** | `GET/POST /api/v1/quotes`, `GET/PUT/DELETE /api/v1/quotes/{id}`, `POST /api/v1/quotes/{id}/send`, `…/accept`, `…/reject`, `…/convert-to-project` |
+| **Pipeline stages** | `GET/POST /api/v1/pipeline/stages`, `PUT/DELETE /api/v1/pipeline/stages/{id}` |
+| **Projects (PM)** | `GET /api/v1/projects/{id}/overview`, `GET /api/v1/projects/{id}/progress`, `POST /api/v1/projects/{id}/assign-technician`, `POST /api/v1/projects/{id}/assign-manager`, `PATCH /api/v1/projects/{id}/progress` |
+| **Installations (terrain)** | `GET /api/v1/installations/{id}`, `POST /api/v1/installations/{id}/start`, `POST /api/v1/installations/{id}/complete`, `PUT /api/v1/installations/{id}/checklist`, `POST /api/v1/installations/{id}/photos` |
+| **Technician / mobile** | `GET /api/v1/me/tasks`, `GET /api/v1/me/installations`, `GET /api/v1/me/schedule?from=&to=` |
+| **Calendar** | `GET /api/v1/calendar?from=&to=&technicianId=&projectId=`, `GET /api/v1/calendar/technicians/{id}`, `GET /api/v1/calendar/projects/{id}` |
+| **Notifications** | `GET /api/v1/notifications`, `POST /api/v1/notifications/read` |
+| **Documents** | `POST /api/v1/documents/upload` (multipart), `GET /api/v1/documents/projects/{projectId}`, `GET /api/v1/documents/clients/{clientId}` — files are stored under `uploads/{societyId}/…` and served at **`/uploads/...`** (static files) |
+| **Reports** | `GET /api/v1/reports/sales`, `GET /api/v1/reports/projects`, `GET /api/v1/reports/technicians`, `GET /api/v1/reports/conversion` |
+| **Society settings** | `GET /api/v1/settings`, `PUT /api/v1/settings` (JSON payload per app contract) |
+| **Roles** | Existing `GET/POST /api/v1/roles`, `PUT/DELETE /api/v1/roles/{id}` plus `GET /api/v1/roles/{id}/permissions`, `PUT /api/v1/roles/{id}/permissions` |
+| **Role name ideas (catalog)** | `GET /api/v1/roles/catalog/commercial-suggestions` — suggested commercial / org role **names** only (not persisted RBAC) |
+
 ## Seeding
 
 On startup: **Core** and **App** and **Platform** EF migrations run, then `DatabaseSeeder` (core catalog), then `PlatformDatabaseSeeder` (platform roles/permissions), then if `PlatformSeed:Enabled` the platform super-admin user is created, legacy tenant user with the same email as the platform operator is removed from **core**, and `PlatformDemoSeeder` can create the two demo societies (`CreateDemoSocieties`).
@@ -53,6 +74,6 @@ Disable demo societies with `"CreateDemoSocieties": false`. Disable all optional
 # Comptes de test (résumé FR)
 
 - **Plateforme** : `POST /api/v1/platform/auth/login` avec `plateforme@crm.local` — APIs sous `/api/v1/platform/…`.
-- **Admins sociétés** : `POST /api/v1/auth/login` avec `admin.essai@crm.local` ou `admin.payant@crm.local` — CRM réservé à leur société ; `switch-society` uniquement si l’utilisateur a plusieurs sociétés. Données CRM : `/api/v1/leads`, `/clients`, `/deals`, `/projects`.
+- **Admins sociétés** : `POST /api/v1/auth/login` avec `admin.essai@crm.local` ou `admin.payant@crm.local` — CRM réservé à leur société ; `switch-society` uniquement si l’utilisateur a plusieurs sociétés. Données CRM : `/api/v1/leads`, `/clients`, `/deals`, `/projects`, et les routes **CRM PRO** (dashboard, devis, pipeline, installations, `me`, calendrier, notifications, documents, rapports, paramètres, permissions rôles — voir tableau ci-dessus).
 
 Les mots de passe par défaut sont dans `PlatformSeed` et doivent être changés en production. Utilisez des clés JWT distinctes et longues pour `Jwt:SigningKey` et `PlatformJwt:SigningKey`.

@@ -17,3 +17,8 @@ public sealed class UpdateRoleRequest
 {
     public string Name { get; init; } = string.Empty;
 }
+
+public sealed class ReplaceRolePermissionsRequest
+{
+    public IReadOnlyList<Guid> PermissionIds { get; init; } = Array.Empty<Guid>();
+}
