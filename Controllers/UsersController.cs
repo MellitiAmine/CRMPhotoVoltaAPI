@@ -11,17 +11,16 @@ namespace CrmPhotoVoltaApis.Controllers;
 
 [ApiController]
 [Authorize(AuthenticationSchemes = AuthSchemes.TenantJwt)]
+[Authorize(Policy = SocietyPolicies.Admin)]
 [Route("api/v1/users")]
-public sealed class UsersController : ControllerBase
+public sealed class UsersController : TenantCrmControllerBase
 {
     private readonly IUserService _users;
-    private readonly ITenantContext _tenant;
     private readonly ICurrentUser _currentUser;
 
-    public UsersController(IUserService users, ITenantContext tenant, ICurrentUser currentUser)
+    public UsersController(IUserService users, ITenantContext tenant, ICurrentUser currentUser) : base(tenant)
     {
         _users = users;
-        _tenant = tenant;
         _currentUser = currentUser;
     }
 
@@ -73,12 +72,5 @@ public sealed class UsersController : ControllerBase
         var societyId = RequireSociety();
         await _users.AssignRoleAsync(societyId, id, request, cancellationToken);
         return Ok(ApiResponse.Ok(new { assigned = true }));
-    }
-
-    private Guid RequireSociety()
-    {
-        if (_tenant.CurrentSocietyId is { } id)
-            return id;
-        throw new AppException("TENANT_REQUIRED", "Society context is required (JWT claim society_id).", StatusCodes.Status403Forbidden);
     }
 }

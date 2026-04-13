@@ -66,12 +66,4 @@ public sealed class AuthController : ControllerBase
         return Ok(ApiResponse.Ok(me));
     }
 
-    [Authorize(AuthenticationSchemes = AuthSchemes.TenantJwt)]
-    [HttpPost("switch-society")]
-    public async Task<IActionResult> SwitchSociety([FromBody] SwitchSocietyRequest request, CancellationToken cancellationToken)
-    {
-        var userId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
-        var tokens = await _auth.SwitchSocietyAsync(userId, request, cancellationToken);
-        return Ok(ApiResponse.Ok(tokens));
-    }
 }

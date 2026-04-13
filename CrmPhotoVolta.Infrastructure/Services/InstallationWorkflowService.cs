@@ -18,13 +18,15 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
     public async Task<InstallationDto> GetAsync(Guid societyId, Guid installationId, CancellationToken cancellationToken = default)
     {
         var inst = await LoadInstallationAsync(societyId, installationId, cancellationToken);
+        TenantGuard.EnsureSameTenant(inst, societyId);
         return Map(inst);
     }
 
     public async Task<InstallationDto> StartAsync(Guid societyId, Guid installationId, CancellationToken cancellationToken = default)
     {
         var inst = await LoadInstallationTrackedAsync(societyId, installationId, cancellationToken);
-        inst.Status = "InProgress";
+        TenantGuard.EnsureSameTenant(inst, societyId);
+        inst.Status = InstallationStatus.InProgress;
         inst.UpdatedAt = DateTimeOffset.UtcNow;
         await _app.SaveChangesAsync(cancellationToken);
         return Map(await LoadInstallationAsync(societyId, installationId, cancellationToken));
@@ -33,7 +35,8 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
     public async Task<InstallationDto> CompleteAsync(Guid societyId, Guid installationId, CancellationToken cancellationToken = default)
     {
         var inst = await LoadInstallationTrackedAsync(societyId, installationId, cancellationToken);
-        inst.Status = "Completed";
+        TenantGuard.EnsureSameTenant(inst, societyId);
+        inst.Status = InstallationStatus.Completed;
         inst.UpdatedAt = DateTimeOffset.UtcNow;
         await _app.SaveChangesAsync(cancellationToken);
         return Map(await LoadInstallationAsync(societyId, installationId, cancellationToken));
@@ -50,7 +53,7 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
         foreach (var u in request.Items)
         {
             var row = await _app.InstallationChecklistItems
-                .FirstOrDefaultAsync(x => x.Id == u.Id && x.InstallationId == installationId, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == u.Id && x.InstallationId == installationId && x.SocietyId == societyId, cancellationToken);
             if (row is null)
                 continue;
 
@@ -61,7 +64,7 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
         await _app.SaveChangesAsync(cancellationToken);
 
         return await _app.InstallationChecklistItems.AsNoTracking()
-            .Where(x => x.InstallationId == installationId)
+            .Where(x => x.InstallationId == installationId && x.SocietyId == societyId)
             .OrderBy(x => x.Item)
             .Select(x => new InstallationChecklistItemDto { Id = x.Id, Item = x.Item, IsCompleted = x.IsCompleted })
             .ToListAsync(cancellationToken);
@@ -80,6 +83,7 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
 
         var photo = new InstallationPhoto
         {
+            SocietyId = societyId,
             InstallationId = installationId,
             Url = request.Url.Trim(),
             UploadedAt = DateTimeOffset.UtcNow,

@@ -7,6 +7,6 @@ public class CrmTask : SocietyScopedEntity
 
     public string Title { get; set; } = string.Empty;
     public Guid? AssignedToUserId { get; set; }
-    public string Status { get; set; } = "Open";
+    public CrmTaskStatus Status { get; set; } = CrmTaskStatus.Open;
     public DateOnly? DueDate { get; set; }
 }

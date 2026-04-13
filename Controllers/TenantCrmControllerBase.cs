@@ -16,8 +16,13 @@ public abstract class TenantCrmControllerBase : ControllerBase
 
     protected Guid RequireSociety()
     {
-        if (_tenant.CurrentSocietyId is { } id)
-            return id;
-        throw new AppException("TENANT_REQUIRED", "Society context is required (JWT claim society_id).", StatusCodes.Status403Forbidden);
+        try
+        {
+            return _tenant.SocietyId;
+        }
+        catch (InvalidOperationException)
+        {
+            throw new AppException("TENANT_REQUIRED", "Society context is required (JWT claim society_id).", StatusCodes.Status403Forbidden);
+        }
     }
 }

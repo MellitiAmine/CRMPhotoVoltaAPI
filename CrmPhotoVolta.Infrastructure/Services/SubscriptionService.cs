@@ -22,7 +22,7 @@ public sealed class SubscriptionService : ISubscriptionService
         var row = await _db.Subscriptions
             .AsNoTracking()
             .Include(x => x.Plan)
-            .Where(x => x.SocietyId == societyId && x.Status == "Active" && !x.IsDeleted)
+            .Where(x => x.SocietyId == societyId && x.Status == SubscriptionStatuses.Active && !x.IsDeleted)
             .OrderByDescending(x => x.StartDate)
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -51,9 +51,9 @@ public sealed class SubscriptionService : ISubscriptionService
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        foreach (var sub in await _db.Subscriptions.Where(x => x.SocietyId == societyId && x.Status == "Active").ToListAsync(cancellationToken))
+        foreach (var sub in await _db.Subscriptions.Where(x => x.SocietyId == societyId && x.Status == SubscriptionStatuses.Active).ToListAsync(cancellationToken))
         {
-            sub.Status = "Superseded";
+            sub.Status = SubscriptionStatuses.Superseded;
             sub.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
@@ -63,7 +63,7 @@ public sealed class SubscriptionService : ISubscriptionService
             PlanId = plan.Id,
             StartDate = today,
             EndDate = SubscriptionPeriodCalculator.ComputeEndDate(today, plan),
-            Status = "Active",
+            Status = SubscriptionStatuses.Active,
             CreatedAt = DateTimeOffset.UtcNow
         };
 

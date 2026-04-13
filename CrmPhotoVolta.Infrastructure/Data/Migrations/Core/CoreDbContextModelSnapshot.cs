@@ -143,6 +143,9 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.Core
 
                     b.HasIndex("SocietyId");
 
+                    b.HasIndex("SocietyId", "Name")
+                        .IsUnique();
+
                     b.ToTable("Roles", "core");
                 });
 

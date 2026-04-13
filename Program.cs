@@ -2,15 +2,19 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CrmPhotoVolta.Application;
 using CrmPhotoVolta.Application.Common;
-using CrmPhotoVolta.Application.Maintenance;
 using CrmPhotoVolta.Infrastructure;
+using CrmPhotoVolta.Infrastructure.Data.App;
+using CrmPhotoVolta.Infrastructure.Data.Core;
+using CrmPhotoVolta.Infrastructure.Data.Platform;
+using CrmPhotoVolta.Infrastructure.Seeding;
 using CrmPhotoVoltaApis.Middleware;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,6 +42,7 @@ builder.Services.AddControllers()
     {
         o.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
         o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+        o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     })
     .ConfigureApiBehaviorOptions(options =>
     {
@@ -62,6 +67,16 @@ builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
+    c.TagActionsBy(api =>
+    {
+        var controller = api.ActionDescriptor.RouteValues.TryGetValue("controller", out var value)
+            ? value
+            : null;
+        return controller is null
+            ? Array.Empty<string>()
+            : new[] { TranslateSwaggerTag(controller) };
+    });
+
     c.SwaggerDoc("v1", new() { Title = "CRM PhotoVolta API", Version = "v1" });
     c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
     {
@@ -92,14 +107,86 @@ builder.Services.AddSwaggerGen(c =>
 });
 // }
 
+static string TranslateSwaggerTag(string controller) =>
+    controller switch
+    {
+        "Auth" => "Auth (Authentification client)",
+        "PlatformAuth" => "PlatformAuth (Authentification plateforme)",
+        "Users" => "Users (Utilisateurs)",
+        "Subscriptions" => "Subscriptions (Abonnements client)",
+        "PlatformSocieties" => "PlatformSocieties (Societes plateforme)",
+        "PlatformSubscriptions" => "PlatformSubscriptions (Abonnements plateforme)",
+        "PlatformSubscriptionPlans" => "PlatformSubscriptionPlans (Plans d'abonnement)",
+        "Permissions" => "Permissions (Droits)",
+        "Roles" => "Roles (Roles)",
+        "RolesCatalog" => "RolesCatalog (Catalogue de roles)",
+        "Leads" => "Leads (Prospects)",
+        "Clients" => "Clients (Clients)",
+        "Deals" => "Deals (Affaires commerciales)",
+        "Projects" => "Projects (Projets)",
+        "Quotes" => "Quotes (Devis)",
+        "Pipeline" => "Pipeline (Etapes du pipeline)",
+        "Dashboard" => "Dashboard (Tableau de bord)",
+        "Installations" => "Installations (Interventions terrain)",
+        "Me" => "Me (Espace technicien)",
+        "Calendar" => "Calendar (Calendrier)",
+        "Notifications" => "Notifications (Notifications)",
+        "Documents" => "Documents (Documents)",
+        "Reports" => "Reports (Rapports)",
+        "Settings" => "Settings (Parametres)",
+        _ => controller
+    };
+
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
-    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
-    var maintenance = scope.ServiceProvider.GetRequiredService<IDatabaseMaintenanceService>();
-    // Migrations: POST /api/v1/maintenance/migrate-and-seed with X-Maintenance-Secret, or dotnet ef database update.
-    await maintenance.RunStartupConnectivityAndSeedAsync(logger, CancellationToken.None);
+    var coreDb = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+    var appDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var platformDb = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
+
+    try
+    {
+        var coreReachable = await coreDb.Database.CanConnectAsync();
+        var appReachable = await appDb.Database.CanConnectAsync();
+        var platformReachable = await platformDb.Database.CanConnectAsync();
+
+        if (!coreReachable || !appReachable || !platformReachable)
+        {
+            app.Logger.LogWarning(
+                "Database check failed (Core: {CoreReachable}, App: {AppReachable}, Platform: {PlatformReachable}). " +
+                "Skipping startup seeding and continuing without crashing.",
+                coreReachable,
+                appReachable,
+                platformReachable);
+        }
+        else
+        {
+            await DatabaseSeeder.EnsureSeedAsync(coreDb, CancellationToken.None);
+            await PlatformDatabaseSeeder.EnsureSeedAsync(platformDb, CancellationToken.None);
+
+            var platformSeed = scope.ServiceProvider.GetRequiredService<IOptions<PlatformSeedOptions>>().Value;
+            if (platformSeed.Enabled)
+            {
+                await PlatformDatabaseSeeder.EnsureSuperAdminUserAsync(
+                    platformDb,
+                    platformSeed.PlatformAdminEmail,
+                    platformSeed.PlatformAdminPassword,
+                    CancellationToken.None);
+            }
+
+            await PlatformDemoSeeder.RemoveLegacyTenantUserMatchingPlatformEmailAsync(
+                coreDb,
+                platformSeed.PlatformAdminEmail,
+                CancellationToken.None);
+
+            await PlatformDemoSeeder.SeedAsync(coreDb, platformSeed, CancellationToken.None);
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Database is unavailable at startup. Skipping DB init and continuing.");
+    }
 }
 
 app.MapGet("/api/health", () => Results.Json(new { status = "ok" }))

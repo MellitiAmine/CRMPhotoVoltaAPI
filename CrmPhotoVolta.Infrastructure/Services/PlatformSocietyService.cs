@@ -69,7 +69,7 @@ public sealed class PlatformSocietyService : IPlatformSocietyService
             PlanId = plan.Id,
             StartDate = start,
             EndDate = SubscriptionPeriodCalculator.ComputeEndDate(start, plan),
-            Status = "Active",
+            Status = SubscriptionStatuses.Active,
             CreatedAt = DateTimeOffset.UtcNow
         });
 
@@ -100,9 +100,9 @@ public sealed class PlatformSocietyService : IPlatformSocietyService
 
             society.SubscriptionPlanId = newPlan.Id;
 
-            foreach (var sub in await _db.Subscriptions.Where(x => x.SocietyId == societyId && x.Status == "Active").ToListAsync(cancellationToken))
+            foreach (var sub in await _db.Subscriptions.Where(x => x.SocietyId == societyId && x.Status == SubscriptionStatuses.Active).ToListAsync(cancellationToken))
             {
-                sub.Status = "Superseded";
+                sub.Status = SubscriptionStatuses.Superseded;
                 sub.UpdatedAt = DateTimeOffset.UtcNow;
             }
 
@@ -113,7 +113,7 @@ public sealed class PlatformSocietyService : IPlatformSocietyService
                 PlanId = newPlan.Id,
                 StartDate = start,
                 EndDate = SubscriptionPeriodCalculator.ComputeEndDate(start, newPlan),
-                Status = "Active",
+                Status = SubscriptionStatuses.Active,
                 CreatedAt = DateTimeOffset.UtcNow
             });
         }

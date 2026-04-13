@@ -1,3 +1,5 @@
+using CrmPhotoVolta.Domain.App;
+
 namespace CrmPhotoVolta.Application.Crm.Quotes;
 
 public sealed class QuoteItemDto
@@ -15,7 +17,7 @@ public sealed class QuoteListItemDto
     public Guid Id { get; init; }
     public string QuoteNumber { get; init; } = string.Empty;
     public string Title { get; init; } = string.Empty;
-    public string Status { get; init; } = string.Empty;
+    public QuoteStatus Status { get; init; }
     public decimal TotalAmount { get; init; }
     public string Currency { get; init; } = "TND";
     public Guid? LeadId { get; init; }
@@ -28,7 +30,7 @@ public sealed class QuoteDto
     public Guid Id { get; init; }
     public string QuoteNumber { get; init; } = string.Empty;
     public string Title { get; init; } = string.Empty;
-    public string Status { get; init; } = string.Empty;
+    public QuoteStatus Status { get; init; }
     public string Currency { get; init; } = "TND";
     public decimal TotalAmount { get; init; }
     public DateOnly? ValidUntil { get; init; }

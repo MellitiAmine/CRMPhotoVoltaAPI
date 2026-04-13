@@ -83,7 +83,7 @@ public sealed class LeadService : ILeadService
             Phone = request.Phone?.Trim(),
             Email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim().ToLowerInvariant(),
             Address = request.Address?.Trim(),
-            Status = string.IsNullOrWhiteSpace(request.Status) ? "New" : request.Status.Trim(),
+            Status = string.IsNullOrWhiteSpace(request.Status) ? LeadStatuses.New : request.Status.Trim(),
             AssignedToUserId = request.AssignedToUserId,
             CreatedAt = DateTimeOffset.UtcNow,
             CreatedById = actorUserId
@@ -110,7 +110,7 @@ public sealed class LeadService : ILeadService
         lead.Phone = request.Phone?.Trim();
         lead.Email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim().ToLowerInvariant();
         lead.Address = request.Address?.Trim();
-        lead.Status = string.IsNullOrWhiteSpace(request.Status) ? "New" : request.Status.Trim();
+        lead.Status = string.IsNullOrWhiteSpace(request.Status) ? LeadStatuses.New : request.Status.Trim();
         lead.AssignedToUserId = request.AssignedToUserId;
         lead.UpdatedAt = DateTimeOffset.UtcNow;
 
@@ -230,7 +230,7 @@ public sealed class LeadService : ILeadService
         var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
-        if (lead.Status == "Converted")
+        if (lead.Status == LeadStatuses.Converted)
             throw new AppException("LEAD_ALREADY_CONVERTED", "Lead is already converted.", 409);
 
         var client = new Client
@@ -255,7 +255,7 @@ public sealed class LeadService : ILeadService
                 SocietyId = societyId,
                 LeadId = leadId,
                 Title = title,
-                Stage = "New",
+                Stage = DealStages.New,
                 CreatedAt = DateTimeOffset.UtcNow
             };
             _app.Deals.Add(deal);
@@ -263,7 +263,7 @@ public sealed class LeadService : ILeadService
             dealId = deal.Id;
         }
 
-        lead.Status = "Converted";
+        lead.Status = LeadStatuses.Converted;
         lead.UpdatedAt = DateTimeOffset.UtcNow;
 
         _app.LeadActivities.Add(new LeadActivity
@@ -292,7 +292,7 @@ public sealed class LeadService : ILeadService
         var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
-        lead.Status = "Won";
+        lead.Status = LeadStatuses.Won;
         lead.UpdatedAt = DateTimeOffset.UtcNow;
 
         _app.LeadActivities.Add(new LeadActivity
@@ -315,7 +315,7 @@ public sealed class LeadService : ILeadService
         var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
-        lead.Status = "Lost";
+        lead.Status = LeadStatuses.Lost;
         lead.UpdatedAt = DateTimeOffset.UtcNow;
 
         _app.LeadActivities.Add(new LeadActivity

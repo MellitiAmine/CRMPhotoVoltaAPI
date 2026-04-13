@@ -10,7 +10,7 @@ public class Project : SocietyScopedEntity
 
     public string Name { get; set; } = string.Empty;
     public string? Address { get; set; }
-    public string Status { get; set; } = "Planned";
+    public ProjectStatus Status { get; set; } = ProjectStatus.Planned;
     public decimal? SystemSizeKw { get; set; }
     public decimal? EstimatedProduction { get; set; }
     public DateOnly? StartDate { get; set; }

@@ -4,6 +4,7 @@ using CrmPhotoVolta.Application.Users;
 using CrmPhotoVolta.Application.Users.Dtos;
 using CrmPhotoVolta.Domain.Core;
 using CrmPhotoVolta.Infrastructure.Data.Core;
+using CrmPhotoVolta.Infrastructure.Data.Platform;
 using Microsoft.EntityFrameworkCore;
 
 namespace CrmPhotoVolta.Infrastructure.Services;
@@ -11,10 +12,12 @@ namespace CrmPhotoVolta.Infrastructure.Services;
 public sealed class UserService : IUserService
 {
     private readonly CoreDbContext _db;
+    private readonly PlatformDbContext _platformDb;
 
-    public UserService(CoreDbContext db)
+    public UserService(CoreDbContext db, PlatformDbContext platformDb)
     {
         _db = db;
+        _platformDb = platformDb;
     }
 
     public async Task<(IReadOnlyList<UserListItemDto> Items, PaginationMeta Meta)> ListPagedAsync(
@@ -22,11 +25,14 @@ public sealed class UserService : IUserService
         PaginationRequest pagination,
         CancellationToken cancellationToken = default)
     {
+        var platformEmails = await PlatformEmailRegistry.LoadLowercaseEmailsAsync(_platformDb, cancellationToken);
+
         var query = _db.UserSocieties
             .AsNoTracking()
             .Include(x => x.User)
             .Include(x => x.Role)
-            .Where(x => x.SocietyId == societyId && !x.IsDeleted && !x.User!.IsDeleted);
+            .Where(x => x.SocietyId == societyId && !x.IsDeleted && !x.User!.IsDeleted)
+            .Where(x => !platformEmails.Contains(x.User!.Email.ToLower()));
 
         if (!string.IsNullOrWhiteSpace(pagination.Search))
         {
@@ -96,6 +102,10 @@ public sealed class UserService : IUserService
         var email = request.Email.Trim().ToLowerInvariant();
         if (await _db.Users.AnyAsync(x => x.Email.ToLower() == email, cancellationToken))
             throw new AppException("EMAIL_IN_USE", "Email is already registered.", 409);
+
+        var platformEmails = await PlatformEmailRegistry.LoadLowercaseEmailsAsync(_platformDb, cancellationToken);
+        if (PlatformEmailRegistry.Contains(platformEmails, email))
+            throw new AppException("EMAIL_RESERVED", "This email is reserved for platform access.", 409);
 
         var role = await _db.Roles.FirstOrDefaultAsync(
             x => x.Id == request.RoleId && x.SocietyId == societyId && !x.IsDeleted,

@@ -13,6 +13,9 @@ public sealed class HttpTenantContext : ITenantContext
         _httpContextAccessor = httpContextAccessor;
     }
 
+    public Guid SocietyId =>
+        CurrentSocietyId ?? throw new InvalidOperationException("Society context is required for this request.");
+
     public Guid? CurrentSocietyId
     {
         get

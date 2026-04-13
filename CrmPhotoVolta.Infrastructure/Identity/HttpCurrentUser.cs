@@ -18,10 +18,16 @@ public sealed class HttpCurrentUser : ICurrentUser
     {
         get
         {
-            var sub = _httpContextAccessor.HttpContext?.User.FindFirstValue(JwtClaimNames.Sub);
+            var user = _httpContextAccessor.HttpContext?.User;
+            if (user is null)
+                return null;
+            var sub = user.FindFirstValue(JwtClaimNames.Sub)
+                ?? user.FindFirstValue(ClaimTypes.NameIdentifier);
             return Guid.TryParse(sub, out var id) ? id : null;
         }
     }
 
-    public string? Email => _httpContextAccessor.HttpContext?.User.FindFirstValue(JwtClaimNames.Email);
+    public string? Email =>
+        _httpContextAccessor.HttpContext?.User.FindFirstValue(JwtClaimNames.Email)
+        ?? _httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.Email);
 }

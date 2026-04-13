@@ -1,8 +1,6 @@
-using CrmPhotoVolta.Domain.Common;
-
 namespace CrmPhotoVolta.Domain.App;
 
-public class InstallationChecklistItem : EntityBase
+public class InstallationChecklistItem : SocietyScopedEntity
 {
     public Guid InstallationId { get; set; }
     public Installation Installation { get; set; } = null!;

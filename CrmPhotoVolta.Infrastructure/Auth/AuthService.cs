@@ -5,6 +5,7 @@ using CrmPhotoVolta.Application.Exceptions;
 using CrmPhotoVolta.Domain.Core;
 using CrmPhotoVolta.Infrastructure.Data;
 using CrmPhotoVolta.Infrastructure.Data.Core;
+using CrmPhotoVolta.Infrastructure.Data.Platform;
 using CrmPhotoVolta.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -14,15 +15,18 @@ namespace CrmPhotoVolta.Infrastructure.Auth;
 public sealed class AuthService : IAuthService
 {
     private readonly CoreDbContext _db;
+    private readonly PlatformDbContext _platformDb;
     private readonly IJwtTokenService _jwt;
     private readonly JwtOptions _jwtOptions;
 
     public AuthService(
         CoreDbContext db,
+        PlatformDbContext platformDb,
         IJwtTokenService jwt,
         IOptions<JwtOptions> jwtOptions)
     {
         _db = db;
+        _platformDb = platformDb;
         _jwt = jwt;
         _jwtOptions = jwtOptions.Value;
     }
@@ -32,6 +36,10 @@ public sealed class AuthService : IAuthService
         var normalizedEmail = request.Email.Trim().ToLowerInvariant();
         if (await _db.Users.AnyAsync(x => x.Email.ToLower() == normalizedEmail, cancellationToken))
             throw new AppException("EMAIL_IN_USE", "Email is already registered.", 409);
+
+        var platformEmails = await PlatformEmailRegistry.LoadLowercaseEmailsAsync(_platformDb, cancellationToken);
+        if (PlatformEmailRegistry.Contains(platformEmails, normalizedEmail))
+            throw new AppException("EMAIL_RESERVED", "This email is reserved for platform access.", 409);
 
         await DatabaseSeeder.EnsureSeedAsync(_db, cancellationToken);
 
@@ -78,7 +86,7 @@ public sealed class AuthService : IAuthService
             PlanId = plan.Id,
             StartDate = start,
             EndDate = SubscriptionPeriodCalculator.ComputeEndDate(start, plan),
-            Status = "Active",
+            Status = SubscriptionStatuses.Active,
             CreatedAt = DateTimeOffset.UtcNow
         });
 
@@ -101,13 +109,21 @@ public sealed class AuthService : IAuthService
         if (!user.IsActive)
             throw new AppException("USER_DISABLED", "User is disabled.", 403);
 
-        var membership = user.UserSocieties
+        var activeMemberships = user.UserSocieties
             .Where(x => !x.IsDeleted && x.Society is { IsDeleted: false, IsActive: true })
             .OrderBy(x => x.Society!.Name)
-            .FirstOrDefault();
+            .ToList();
 
-        if (membership is null)
+        if (activeMemberships.Count == 0)
             throw new AppException("NO_SOCIETY_ACCESS", "User is not assigned to any active society.", 403);
+
+        if (activeMemberships.Count > 1)
+            throw new AppException(
+                "MULTI_SOCIETY_NOT_ALLOWED",
+                "This account is linked to multiple societies, which is forbidden by current security policy. Contact platform support to clean memberships.",
+                403);
+
+        var membership = activeMemberships[0];
 
         return await IssueTokensAsync(user, membership.SocietyId, cancellationToken);
     }
@@ -169,6 +185,12 @@ public sealed class AuthService : IAuthService
             .OrderBy(x => x.SocietyName)
             .ToList();
 
+        if (societies.Count > 1)
+            throw new AppException(
+                "MULTI_SOCIETY_NOT_ALLOWED",
+                "This account is linked to multiple societies, which is forbidden by current security policy. Contact platform support to clean memberships.",
+                403);
+
         return new MeResponse
         {
             UserId = user.Id,
@@ -178,22 +200,6 @@ public sealed class AuthService : IAuthService
             CurrentSocietyId = societyId,
             Societies = societies
         };
-    }
-
-    public async Task<AuthTokensResponse> SwitchSocietyAsync(Guid userId, SwitchSocietyRequest request, CancellationToken cancellationToken = default)
-    {
-        var user = await _db.Users
-            .Include(x => x.UserSocieties)
-            .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
-            ?? throw new AppException("USER_NOT_FOUND", "User not found.", 404);
-
-        var membership = user.UserSocieties.FirstOrDefault(x =>
-            x.SocietyId == request.SocietyId && !x.IsDeleted);
-
-        if (membership is null)
-            throw new AppException("FORBIDDEN_SOCIETY", "You do not have access to this society.", 403);
-
-        return await IssueTokensAsync(user, request.SocietyId, cancellationToken);
     }
 
     private async Task<AuthTokensResponse> IssueTokensAsync(User user, Guid societyId, CancellationToken cancellationToken)

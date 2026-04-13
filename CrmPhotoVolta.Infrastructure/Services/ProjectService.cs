@@ -92,7 +92,7 @@ public sealed class ProjectService : IProjectService
             DealId = request.DealId,
             Name = request.Name.Trim(),
             Address = request.Address?.Trim(),
-            Status = string.IsNullOrWhiteSpace(request.Status) ? "Planned" : request.Status.Trim(),
+            Status = request.Status ?? ProjectStatus.Planned,
             SystemSizeKw = request.SystemSizeKw,
             EstimatedProduction = request.EstimatedProduction,
             StartDate = request.StartDate,
@@ -134,7 +134,7 @@ public sealed class ProjectService : IProjectService
         project.DealId = request.DealId;
         project.Name = request.Name.Trim();
         project.Address = request.Address?.Trim();
-        project.Status = string.IsNullOrWhiteSpace(request.Status) ? "Planned" : request.Status.Trim();
+        project.Status = request.Status;
         project.SystemSizeKw = request.SystemSizeKw;
         project.EstimatedProduction = request.EstimatedProduction;
         project.StartDate = request.StartDate;
@@ -174,7 +174,7 @@ public sealed class ProjectService : IProjectService
             ?? throw new AppException("PROJECT_NOT_FOUND", "Project not found.", 404);
 
         var openTasks = await _app.Tasks.CountAsync(
-            x => x.SocietyId == societyId && x.ProjectId == projectId && x.Status != "Done",
+            x => x.SocietyId == societyId && x.ProjectId == projectId && x.Status != CrmTaskStatus.Done,
             cancellationToken);
 
         var inst = await _app.Installations
@@ -187,7 +187,7 @@ public sealed class ProjectService : IProjectService
             Project = Map(project),
             OpenTasks = openTasks,
             InstallationsTotal = inst.Count,
-            InstallationsCompleted = inst.Count(s => s == "Completed")
+            InstallationsCompleted = inst.Count(s => s == InstallationStatus.Completed)
         };
     }
 
@@ -198,11 +198,11 @@ public sealed class ProjectService : IProjectService
             ?? throw new AppException("PROJECT_NOT_FOUND", "Project not found.", 404);
 
         var track = await _app.ProjectStageTrackings
-            .Where(x => x.ProjectId == projectId)
+            .Where(x => x.ProjectId == projectId && x.SocietyId == societyId)
             .ToListAsync(cancellationToken);
 
         var total = track.Count;
-        var done = track.Count(x => x.Status == "Done" || x.CompletedAt is not null);
+        var done = track.Count(x => x.Status == ProjectStageTrackingStatus.Done || x.CompletedAt is not null);
 
         var project = await _app.Projects.AsNoTracking()
             .FirstAsync(x => x.Id == projectId && x.SocietyId == societyId, cancellationToken);

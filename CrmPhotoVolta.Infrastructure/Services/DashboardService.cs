@@ -1,4 +1,5 @@
 using CrmPhotoVolta.Application.Crm.Dashboard;
+using CrmPhotoVolta.Domain.App;
 using CrmPhotoVolta.Infrastructure.Data.App;
 using Microsoft.EntityFrameworkCore;
 
@@ -33,16 +34,16 @@ public sealed class DashboardService : IDashboardService
     {
         var leadsCount = await _app.Leads.CountAsync(x => x.SocietyId == societyId, cancellationToken);
         var converted = await _app.Leads.CountAsync(
-            x => x.SocietyId == societyId && (x.Status == "Converted" || x.Status == "Won"),
+            x => x.SocietyId == societyId && (x.Status == LeadStatuses.Converted || x.Status == LeadStatuses.Won),
             cancellationToken);
         var conversionRate = leadsCount == 0 ? 0 : Math.Round(100m * converted / leadsCount, 2);
 
         var activeDeals = await _app.Deals.CountAsync(
-            x => x.SocietyId == societyId && x.Stage != "Lost" && x.Stage != "Won",
+            x => x.SocietyId == societyId && x.Stage != DealStages.Lost && x.Stage != DealStages.Won,
             cancellationToken);
 
         var acceptedQuotes = await _app.Quotes
-            .Where(x => x.SocietyId == societyId && x.Status == "Accepted")
+            .Where(x => x.SocietyId == societyId && x.Status == QuoteStatus.Accepted)
             .SumAsync(x => (decimal?)x.TotalAmount, cancellationToken) ?? 0;
 
         var dealsValue = await _app.Deals
@@ -63,7 +64,7 @@ public sealed class DashboardService : IDashboardService
 
         var installationProgress = inst.Count == 0
             ? 0
-            : Math.Round(100m * inst.Count(s => s == "Completed") / inst.Count, 2);
+            : Math.Round(100m * inst.Count(s => s == InstallationStatus.Completed) / inst.Count, 2);
 
         return new DashboardKpisDto
         {
@@ -79,7 +80,7 @@ public sealed class DashboardService : IDashboardService
     public async Task<DashboardRevenueDto> GetRevenueAsync(Guid societyId, CancellationToken cancellationToken = default)
     {
         var acceptedQuotesTotal = await _app.Quotes
-            .Where(x => x.SocietyId == societyId && x.Status == "Accepted")
+            .Where(x => x.SocietyId == societyId && x.Status == QuoteStatus.Accepted)
             .SumAsync(x => (decimal?)x.TotalAmount, cancellationToken) ?? 0;
 
         var dealsValueTotal = await _app.Deals
@@ -113,7 +114,7 @@ public sealed class DashboardService : IDashboardService
             .ToListAsync(cancellationToken);
 
         var openLeads = await _app.Leads.CountAsync(
-            x => x.SocietyId == societyId && x.Status != "Lost" && x.Status != "Converted" && x.Status != "Won",
+            x => x.SocietyId == societyId && x.Status != LeadStatuses.Lost && x.Status != LeadStatuses.Converted && x.Status != LeadStatuses.Won,
             cancellationToken);
 
         return new DashboardPipelineDto
@@ -131,8 +132,8 @@ public sealed class DashboardService : IDashboardService
             .ToListAsync(cancellationToken);
 
         var total = rows.Count;
-        var active = rows.Count(x => x.Status != "Done" && x.Status != "Cancelled");
-        var completed = rows.Count(x => x.Status == "Done");
+        var active = rows.Count(x => x.Status != ProjectStatus.Done && x.Status != ProjectStatus.Cancelled);
+        var completed = rows.Count(x => x.Status == ProjectStatus.Done);
         var avgProgress = total == 0 ? 0 : rows.Average(x => (double)x.ProgressPercent);
 
         return new DashboardProjectsDto

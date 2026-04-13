@@ -344,6 +344,9 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid>("SocietyId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -353,6 +356,9 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                     b.HasKey("Id");
 
                     b.HasIndex("InstallationId");
+
+                    b.HasIndex("SocietyId")
+                        .HasDatabaseName("IX_InstallationChecklist_SocietyId");
 
                     b.ToTable("InstallationChecklist", "app");
                 });
@@ -375,6 +381,9 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<Guid>("SocietyId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -391,6 +400,9 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                     b.HasKey("Id");
 
                     b.HasIndex("InstallationId");
+
+                    b.HasIndex("SocietyId")
+                        .HasDatabaseName("IX_InstallationPhotos_SocietyId");
 
                     b.ToTable("InstallationPhotos", "app");
                 });
@@ -722,6 +734,9 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("SocietyId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("StageId")
                         .HasColumnType("uuid");
 
@@ -739,6 +754,9 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
 
                     b.HasIndex("ProjectId")
                         .HasDatabaseName("IX_ProjectStageTracking_ProjectId");
+
+                    b.HasIndex("SocietyId")
+                        .HasDatabaseName("IX_ProjectStageTracking_SocietyId");
 
                     b.HasIndex("StageId");
 

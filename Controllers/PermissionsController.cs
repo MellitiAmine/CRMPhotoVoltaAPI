@@ -8,6 +8,7 @@ namespace CrmPhotoVoltaApis.Controllers;
 
 [ApiController]
 [Authorize(AuthenticationSchemes = AuthSchemes.TenantJwt)]
+[Authorize(Policy = SocietyPolicies.Admin)]
 [Route("api/v1/permissions")]
 public sealed class PermissionsController : ControllerBase
 {

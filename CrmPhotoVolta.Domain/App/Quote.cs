@@ -17,8 +17,7 @@ public class Quote : SocietyScopedEntity
     public string QuoteNumber { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
 
-    /// <summary>Draft, Sent, Accepted, Rejected, Converted</summary>
-    public string Status { get; set; } = "Draft";
+    public QuoteStatus Status { get; set; } = QuoteStatus.Draft;
 
     public string Currency { get; set; } = "TND";
     public decimal TotalAmount { get; set; }

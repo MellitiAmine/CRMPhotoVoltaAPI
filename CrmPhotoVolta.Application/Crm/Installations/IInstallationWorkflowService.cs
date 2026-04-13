@@ -1,3 +1,5 @@
+using CrmPhotoVolta.Domain.App;
+
 namespace CrmPhotoVolta.Application.Crm.Installations;
 
 public interface IInstallationWorkflowService
@@ -15,7 +17,7 @@ public sealed class InstallationDto
     public Guid ProjectId { get; init; }
     public Guid TechnicianId { get; init; }
     public DateOnly Date { get; init; }
-    public string Status { get; init; } = string.Empty;
+    public InstallationStatus Status { get; init; }
     public IReadOnlyList<InstallationChecklistItemDto> Checklist { get; init; } = Array.Empty<InstallationChecklistItemDto>();
     public IReadOnlyList<InstallationPhotoDto> Photos { get; init; } = Array.Empty<InstallationPhotoDto>();
 }

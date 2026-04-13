@@ -1,3 +1,5 @@
+using CrmPhotoVolta.Domain.App;
+
 namespace CrmPhotoVolta.Application.Crm.Me;
 
 public interface IMeWorkspaceService
@@ -13,7 +15,7 @@ public sealed class MyTaskDto
     public Guid ProjectId { get; init; }
     public string ProjectName { get; init; } = string.Empty;
     public string Title { get; init; } = string.Empty;
-    public string Status { get; init; } = string.Empty;
+    public CrmTaskStatus Status { get; init; }
     public DateOnly? DueDate { get; init; }
 }
 
@@ -23,7 +25,7 @@ public sealed class MyInstallationDto
     public Guid ProjectId { get; init; }
     public string ProjectName { get; init; } = string.Empty;
     public DateOnly Date { get; init; }
-    public string Status { get; init; } = string.Empty;
+    public InstallationStatus Status { get; init; }
 }
 
 public sealed class MyScheduleEntryDto

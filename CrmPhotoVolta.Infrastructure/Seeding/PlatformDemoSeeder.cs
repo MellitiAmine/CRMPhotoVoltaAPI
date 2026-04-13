@@ -121,7 +121,7 @@ public static class PlatformDemoSeeder
                 PlanId = planId,
                 StartDate = start,
                 EndDate = SubscriptionPeriodCalculator.ComputeEndDate(start, plan),
-                Status = "Active",
+                Status = SubscriptionStatuses.Active,
                 CreatedAt = DateTimeOffset.UtcNow
             });
 

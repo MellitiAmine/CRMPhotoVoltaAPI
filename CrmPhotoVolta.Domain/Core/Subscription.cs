@@ -10,5 +10,5 @@ public class Subscription : Common.EntityBase
 
     public DateOnly StartDate { get; set; }
     public DateOnly EndDate { get; set; }
-    public string Status { get; set; } = "Active";
+    public string Status { get; set; } = SubscriptionStatuses.Active;
 }

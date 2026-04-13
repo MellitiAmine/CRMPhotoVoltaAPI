@@ -20,11 +20,6 @@ public sealed class RefreshRequest
     public string RefreshToken { get; init; } = string.Empty;
 }
 
-public sealed class SwitchSocietyRequest
-{
-    public Guid SocietyId { get; init; }
-}
-
 public sealed class AuthTokensResponse
 {
     public string AccessToken { get; init; } = string.Empty;

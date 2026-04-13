@@ -56,6 +56,7 @@ public sealed class CoreDbContext : DbContext
             b.ToTable("Roles");
             b.Property(x => x.Name).HasMaxLength(100);
             b.HasIndex(x => x.SocietyId);
+            b.HasIndex(x => new { x.SocietyId, x.Name }).IsUnique();
             b.HasOne(x => x.Society).WithMany().HasForeignKey(x => x.SocietyId).OnDelete(DeleteBehavior.Cascade);
         });
 

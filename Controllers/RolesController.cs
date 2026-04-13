@@ -12,6 +12,7 @@ namespace CrmPhotoVoltaApis.Controllers;
 
 [ApiController]
 [Authorize(AuthenticationSchemes = AuthSchemes.TenantJwt)]
+[Authorize(Policy = SocietyPolicies.Admin)]
 [Route("api/v1/roles")]
 public sealed class RolesController : TenantCrmControllerBase
 {

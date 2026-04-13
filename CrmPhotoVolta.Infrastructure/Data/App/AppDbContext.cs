@@ -1,3 +1,4 @@
+using CrmPhotoVolta.Application.Abstractions;
 using CrmPhotoVolta.Domain.App;
 using Microsoft.EntityFrameworkCore;
 
@@ -5,8 +6,12 @@ namespace CrmPhotoVolta.Infrastructure.Data.App;
 
 public sealed class AppDbContext : DbContext
 {
-    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+    private readonly Guid? _tenantSocietyId;
+
+    public AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext? tenantContext = null) : base(options)
     {
+        // RLS-ready: this tenant id can later be pushed as `SET app.current_society_id = ...`.
+        _tenantSocietyId = tenantContext?.CurrentSocietyId;
     }
 
     public DbSet<Lead> Leads => Set<Lead>();
@@ -71,6 +76,7 @@ public sealed class AppDbContext : DbContext
             b.ToTable("Projects");
             b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Projects_SocietyId");
             b.Property(x => x.ProgressPercent).HasDefaultValue(0);
+            b.Property(x => x.Status).HasConversion<string>();
             b.HasOne(x => x.Client).WithMany(x => x.Projects).HasForeignKey(x => x.ClientId);
             b.HasOne(x => x.Deal).WithMany(x => x.Projects).HasForeignKey(x => x.DealId);
         });
@@ -84,7 +90,9 @@ public sealed class AppDbContext : DbContext
         modelBuilder.Entity<ProjectStageTracking>(b =>
         {
             b.ToTable("ProjectStageTracking");
+            b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_ProjectStageTracking_SocietyId");
             b.HasIndex(x => x.ProjectId).HasDatabaseName("IX_ProjectStageTracking_ProjectId");
+            b.Property(x => x.Status).HasConversion<string>();
             b.HasOne(x => x.Project).WithMany(x => x.StageTrackings).HasForeignKey(x => x.ProjectId);
             b.HasOne(x => x.Stage).WithMany(x => x.Trackings).HasForeignKey(x => x.StageId);
         });
@@ -93,6 +101,7 @@ public sealed class AppDbContext : DbContext
         {
             b.ToTable("Tasks");
             b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Tasks_SocietyId");
+            b.Property(x => x.Status).HasConversion<string>();
             b.HasOne(x => x.Project).WithMany(x => x.Tasks).HasForeignKey(x => x.ProjectId);
         });
 
@@ -100,18 +109,21 @@ public sealed class AppDbContext : DbContext
         {
             b.ToTable("Installations");
             b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Installations_SocietyId");
+            b.Property(x => x.Status).HasConversion<string>();
             b.HasOne(x => x.Project).WithMany(x => x.Installations).HasForeignKey(x => x.ProjectId);
         });
 
         modelBuilder.Entity<InstallationChecklistItem>(b =>
         {
             b.ToTable("InstallationChecklist");
+            b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_InstallationChecklist_SocietyId");
             b.HasOne(x => x.Installation).WithMany(x => x.Checklist).HasForeignKey(x => x.InstallationId);
         });
 
         modelBuilder.Entity<InstallationPhoto>(b =>
         {
             b.ToTable("InstallationPhotos");
+            b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_InstallationPhotos_SocietyId");
             b.HasOne(x => x.Installation).WithMany(x => x.Photos).HasForeignKey(x => x.InstallationId);
         });
 
@@ -134,7 +146,7 @@ public sealed class AppDbContext : DbContext
             b.HasIndex(x => new { x.SocietyId, x.QuoteNumber }).IsUnique();
             b.Property(x => x.QuoteNumber).HasMaxLength(64);
             b.Property(x => x.Title).HasMaxLength(200);
-            b.Property(x => x.Status).HasMaxLength(40);
+            b.Property(x => x.Status).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.Currency).HasMaxLength(8);
             b.HasOne(x => x.Lead).WithMany().HasForeignKey(x => x.LeadId).OnDelete(DeleteBehavior.SetNull);
             b.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.SetNull);
@@ -165,6 +177,23 @@ public sealed class AppDbContext : DbContext
             b.HasIndex(x => x.SocietyId).IsUnique();
         });
 
-        modelBuilder.ApplySoftDeleteQueryFilter();
+        modelBuilder.Entity<Lead>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<LeadActivity>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<Client>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<Deal>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<PipelineStage>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<Project>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<ProjectStage>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<ProjectStageTracking>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<CrmTask>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<Installation>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<InstallationChecklistItem>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<InstallationPhoto>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<Document>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<CalendarEvent>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<Quote>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<QuoteItem>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<Notification>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<SocietySettings>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
     }
 }

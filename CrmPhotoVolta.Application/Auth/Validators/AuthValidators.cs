@@ -30,11 +30,3 @@ public sealed class RefreshRequestValidator : AbstractValidator<RefreshRequest>
         RuleFor(x => x.RefreshToken).NotEmpty();
     }
 }
-
-public sealed class SwitchSocietyRequestValidator : AbstractValidator<SwitchSocietyRequest>
-{
-    public SwitchSocietyRequestValidator()
-    {
-        RuleFor(x => x.SocietyId).NotEmpty();
-    }
-}

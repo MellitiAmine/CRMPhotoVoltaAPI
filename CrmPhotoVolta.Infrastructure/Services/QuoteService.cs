@@ -84,7 +84,7 @@ public sealed class QuoteService : IQuoteService
             DealId = request.DealId,
             QuoteNumber = number,
             Title = request.Title.Trim(),
-            Status = "Draft",
+            Status = QuoteStatus.Draft,
             Currency = string.IsNullOrWhiteSpace(request.Currency) ? "TND" : request.Currency.Trim().ToUpperInvariant(),
             ValidUntil = request.ValidUntil,
             CreatedAt = DateTimeOffset.UtcNow
@@ -108,7 +108,7 @@ public sealed class QuoteService : IQuoteService
             .FirstOrDefaultAsync(x => x.Id == quoteId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("QUOTE_NOT_FOUND", "Quote not found.", 404);
 
-        if (quote.Status != "Draft")
+        if (quote.Status != QuoteStatus.Draft)
             throw new AppException("QUOTE_LOCKED", "Only draft quotes can be edited.", 409);
 
         await ValidateLinksAsync(societyId, request.LeadId, request.ClientId, request.DealId, cancellationToken);
@@ -135,7 +135,7 @@ public sealed class QuoteService : IQuoteService
         var quote = await _app.Quotes.FirstOrDefaultAsync(x => x.Id == quoteId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("QUOTE_NOT_FOUND", "Quote not found.", 404);
 
-        if (quote.Status is "Accepted" or "Converted")
+        if (quote.Status is QuoteStatus.Accepted or QuoteStatus.Converted)
             throw new AppException("QUOTE_LOCKED", "Cannot delete an accepted or converted quote.", 409);
 
         quote.IsDeleted = true;
@@ -148,10 +148,10 @@ public sealed class QuoteService : IQuoteService
         var quote = await _app.Quotes.FirstOrDefaultAsync(x => x.Id == quoteId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("QUOTE_NOT_FOUND", "Quote not found.", 404);
 
-        if (quote.Status != "Draft")
+        if (quote.Status != QuoteStatus.Draft)
             throw new AppException("QUOTE_INVALID_STATE", "Only draft quotes can be sent.", 409);
 
-        quote.Status = "Sent";
+        quote.Status = QuoteStatus.Sent;
         quote.SentAt = DateTimeOffset.UtcNow;
         quote.UpdatedAt = DateTimeOffset.UtcNow;
         quote.UpdatedById = actorUserId;
@@ -165,10 +165,10 @@ public sealed class QuoteService : IQuoteService
         var quote = await _app.Quotes.FirstOrDefaultAsync(x => x.Id == quoteId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("QUOTE_NOT_FOUND", "Quote not found.", 404);
 
-        if (quote.Status != "Sent")
+        if (quote.Status != QuoteStatus.Sent)
             throw new AppException("QUOTE_INVALID_STATE", "Only sent quotes can be accepted.", 409);
 
-        quote.Status = "Accepted";
+        quote.Status = QuoteStatus.Accepted;
         quote.AcceptedAt = DateTimeOffset.UtcNow;
         quote.UpdatedAt = DateTimeOffset.UtcNow;
         await _app.SaveChangesAsync(cancellationToken);
@@ -181,10 +181,10 @@ public sealed class QuoteService : IQuoteService
         var quote = await _app.Quotes.FirstOrDefaultAsync(x => x.Id == quoteId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("QUOTE_NOT_FOUND", "Quote not found.", 404);
 
-        if (quote.Status != "Sent")
+        if (quote.Status != QuoteStatus.Sent)
             throw new AppException("QUOTE_INVALID_STATE", "Only sent quotes can be rejected.", 409);
 
-        quote.Status = "Rejected";
+        quote.Status = QuoteStatus.Rejected;
         quote.RejectedAt = DateTimeOffset.UtcNow;
         quote.UpdatedAt = DateTimeOffset.UtcNow;
         await _app.SaveChangesAsync(cancellationToken);
@@ -206,7 +206,7 @@ public sealed class QuoteService : IQuoteService
             .FirstOrDefaultAsync(x => x.Id == quoteId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("QUOTE_NOT_FOUND", "Quote not found.", 404);
 
-        if (quote.Status != "Accepted")
+        if (quote.Status != QuoteStatus.Accepted)
             throw new AppException("QUOTE_INVALID_STATE", "Only accepted quotes can be converted to a project.", 409);
 
         if (quote.ProjectId is not null)
@@ -224,7 +224,7 @@ public sealed class QuoteService : IQuoteService
             DealId = quote.DealId,
             Name = request.ProjectName.Trim(),
             Address = request.Address?.Trim(),
-            Status = "Planned",
+            Status = ProjectStatus.Planned,
             ProgressPercent = 0,
             CreatedAt = DateTimeOffset.UtcNow
         };
@@ -233,7 +233,7 @@ public sealed class QuoteService : IQuoteService
         await _app.SaveChangesAsync(cancellationToken);
 
         quote.ProjectId = project.Id;
-        quote.Status = "Converted";
+        quote.Status = QuoteStatus.Converted;
         quote.UpdatedAt = DateTimeOffset.UtcNow;
         await _app.SaveChangesAsync(cancellationToken);
 

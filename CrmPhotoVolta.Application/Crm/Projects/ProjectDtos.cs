@@ -1,3 +1,5 @@
+using CrmPhotoVolta.Domain.App;
+
 namespace CrmPhotoVolta.Application.Crm.Projects;
 
 public sealed class ProjectListItemDto
@@ -7,7 +9,7 @@ public sealed class ProjectListItemDto
     public string ClientName { get; init; } = string.Empty;
     public Guid? DealId { get; init; }
     public string Name { get; init; } = string.Empty;
-    public string Status { get; init; } = string.Empty;
+    public ProjectStatus Status { get; init; }
     public decimal? SystemSizeKw { get; init; }
     public int ProgressPercent { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
@@ -21,7 +23,7 @@ public sealed class ProjectDto
     public Guid? DealId { get; init; }
     public string Name { get; init; } = string.Empty;
     public string? Address { get; init; }
-    public string Status { get; init; } = string.Empty;
+    public ProjectStatus Status { get; init; }
     public decimal? SystemSizeKw { get; init; }
     public decimal? EstimatedProduction { get; init; }
     public DateOnly? StartDate { get; init; }
@@ -39,7 +41,7 @@ public sealed class CreateProjectRequest
     public Guid? DealId { get; init; }
     public string Name { get; init; } = string.Empty;
     public string? Address { get; init; }
-    public string? Status { get; init; }
+    public ProjectStatus? Status { get; init; }
     public decimal? SystemSizeKw { get; init; }
     public decimal? EstimatedProduction { get; init; }
     public DateOnly? StartDate { get; init; }
@@ -55,7 +57,7 @@ public sealed class UpdateProjectRequest
     public Guid? DealId { get; init; }
     public string Name { get; init; } = string.Empty;
     public string? Address { get; init; }
-    public string Status { get; init; } = string.Empty;
+    public ProjectStatus Status { get; init; }
     public decimal? SystemSizeKw { get; init; }
     public decimal? EstimatedProduction { get; init; }
     public DateOnly? StartDate { get; init; }

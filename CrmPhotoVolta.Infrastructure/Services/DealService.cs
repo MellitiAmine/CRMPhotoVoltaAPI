@@ -82,7 +82,7 @@ public sealed class DealService : IDealService
             LeadId = request.LeadId,
             Title = request.Title.Trim(),
             Value = request.Value,
-            Stage = string.IsNullOrWhiteSpace(request.Stage) ? "New" : request.Stage.Trim(),
+            Stage = string.IsNullOrWhiteSpace(request.Stage) ? DealStages.New : request.Stage.Trim(),
             AssignedToUserId = request.AssignedToUserId,
             CreatedAt = DateTimeOffset.UtcNow
         };
@@ -110,7 +110,7 @@ public sealed class DealService : IDealService
         deal.LeadId = request.LeadId;
         deal.Title = request.Title.Trim();
         deal.Value = request.Value;
-        deal.Stage = string.IsNullOrWhiteSpace(request.Stage) ? "New" : request.Stage.Trim();
+        deal.Stage = string.IsNullOrWhiteSpace(request.Stage) ? DealStages.New : request.Stage.Trim();
         deal.AssignedToUserId = request.AssignedToUserId;
         deal.UpdatedAt = DateTimeOffset.UtcNow;
 

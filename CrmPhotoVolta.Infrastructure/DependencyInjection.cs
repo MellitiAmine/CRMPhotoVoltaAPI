@@ -1,6 +1,5 @@
 using System.Text;
 using CrmPhotoVolta.Application.Abstractions;
-using CrmPhotoVolta.Application.Maintenance;
 using CrmPhotoVolta.Application.Auth;
 using CrmPhotoVolta.Application.Crm.Calendar;
 using CrmPhotoVolta.Application.Crm.Clients;
@@ -24,6 +23,7 @@ using CrmPhotoVolta.Application.Platform.Subscriptions;
 using CrmPhotoVolta.Application.Roles;
 using CrmPhotoVolta.Application.Societies;
 using CrmPhotoVolta.Application.Subscriptions;
+using CrmPhotoVolta.Application.Tenancy;
 using CrmPhotoVolta.Application.Users;
 using CrmPhotoVolta.Infrastructure.Auth;
 using CrmPhotoVolta.Infrastructure.Data.App;
@@ -34,6 +34,7 @@ using CrmPhotoVolta.Infrastructure.Services;
 using CrmPhotoVolta.Infrastructure.Seeding;
 using CrmPhotoVolta.Infrastructure.Tenancy;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -68,8 +69,6 @@ public static class DependencyInjection
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
         services.Configure<PlatformJwtOptions>(configuration.GetSection(PlatformJwtOptions.SectionName));
         services.Configure<PlatformSeedOptions>(configuration.GetSection(PlatformSeedOptions.SectionName));
-        services.Configure<MaintenanceOptions>(configuration.GetSection(MaintenanceOptions.SectionName));
-        services.AddScoped<IDatabaseMaintenanceService, DatabaseMaintenanceService>();
         services.AddSingleton<IJwtTokenService, JwtTokenService>();
         services.AddSingleton<IPlatformJwtTokenService, PlatformJwtTokenService>();
 
@@ -80,7 +79,6 @@ public static class DependencyInjection
 
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IPlatformAuthService, PlatformAuthService>();
-        services.AddScoped<ISocietyService, SocietyService>();
         services.AddScoped<IPlatformSocietyService, PlatformSocietyService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IRoleService, RoleService>();
@@ -88,6 +86,7 @@ public static class DependencyInjection
         services.AddScoped<ISubscriptionService, SubscriptionService>();
         services.AddScoped<IPlatformSubscriptionPlanService, PlatformSubscriptionPlanService>();
         services.AddScoped<IPlatformSubscriptionAdminService, PlatformSubscriptionAdminService>();
+        services.AddScoped<ITenantProvisioningService, TenantProvisioningService>();
 
         services.AddScoped<ILeadService, LeadService>();
         services.AddScoped<IClientService, ClientService>();
@@ -118,6 +117,8 @@ public static class DependencyInjection
             })
             .AddJwtBearer(AuthSchemes.TenantJwt, options =>
             {
+                // Keep JWT short claim names (sub, email, …) so ICurrentUser and middleware match JwtClaimNames.
+                options.MapInboundClaims = false;
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,
@@ -131,6 +132,7 @@ public static class DependencyInjection
             })
             .AddJwtBearer(AuthSchemes.PlatformJwt, options =>
             {
+                options.MapInboundClaims = false;
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,
@@ -143,7 +145,25 @@ public static class DependencyInjection
                 };
             });
 
-        services.AddAuthorization();
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy(SocietyPolicies.Admin, policy =>
+            {
+                policy.RequireAuthenticatedUser();
+                policy.Requirements.Add(new SocietyRoleRequirement("Admin"));
+            });
+            options.AddPolicy(SocietyPolicies.Commercial, policy =>
+            {
+                policy.RequireAuthenticatedUser();
+                policy.Requirements.Add(new SocietyRoleRequirement("Admin", "Commercial"));
+            });
+            options.AddPolicy(SocietyPolicies.Technician, policy =>
+            {
+                policy.RequireAuthenticatedUser();
+                policy.Requirements.Add(new SocietyRoleRequirement("Admin", "Technician"));
+            });
+        });
+        services.AddScoped<IAuthorizationHandler, SocietyRoleHandler>();
 
         return services;
     }
