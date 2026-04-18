@@ -98,6 +98,11 @@ Role name ideas (non-binding): `GET /api/v1/roles/catalog/commercial-suggestions
 | Convert to client (+ optional deal) | `POST` | `/api/v1/leads/{id}/convert` |
 | Outcomes | `POST` | `/api/v1/leads/{id}/mark-won`, `.../mark-lost` |
 | Note / timeline | `POST` `GET` | `/api/v1/leads/{id}/notes`, `.../timeline` |
+| Recalcul score LVI/SD | `POST` | `/api/v1/leads/{id}/score` |
+
+**Scoring (LVI / SD)** — Les champs `monthlyBillEur`, `estimatedKw`, `averageRating`, `bonusQuoteRequested`, etc. sont sur le **lead** (`POST`/`PUT`). Les **activités** avec des `type` conformes à `LeadActivityTypes` (ex. `Call`, `QuoteRequest`, `MeetingScheduled`) alimentent interaction / intention. Le serveur **persiste** `lvi`, `sd`, `scoredAt`, `scoreBreakdown` (voir `GET /api/v1/leads/{id}`) et recalcule après création, mise à jour, activité, assignation, conversion, gagné/perdu. Tri liste : `sortBy=lvi` (avec `sortOrder`).
+
+Voir aussi `guide/ScoringLead.md`.
 
 ### 5.2 Clients & deals
 

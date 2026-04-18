@@ -32,6 +32,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<QuoteItem> QuoteItems => Set<QuoteItem>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<SocietySettings> SocietySettings => Set<SocietySettings>();
+    public DbSet<WhatsAppRecommendation> WhatsAppRecommendations => Set<WhatsAppRecommendation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -41,7 +42,10 @@ public sealed class AppDbContext : DbContext
         {
             b.ToTable("Leads");
             b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Leads_SocietyId");
+            b.HasIndex(x => new { x.SocietyId, x.Lvi }).HasDatabaseName("IX_Leads_SocietyId_Lvi");
             b.Property(x => x.Name).HasMaxLength(200);
+            b.Property(x => x.Temperature).HasConversion<int>();
+            b.Property(x => x.Priority).HasConversion<int>();
         });
 
         modelBuilder.Entity<LeadActivity>(b =>
@@ -49,6 +53,7 @@ public sealed class AppDbContext : DbContext
             b.ToTable("LeadActivities");
             b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_LeadActivities_SocietyId");
             b.HasOne(x => x.Lead).WithMany(x => x.Activities).HasForeignKey(x => x.LeadId);
+            b.Property(x => x.Type).HasConversion<int>();
         });
 
         modelBuilder.Entity<Client>(b =>
@@ -177,6 +182,19 @@ public sealed class AppDbContext : DbContext
             b.HasIndex(x => x.SocietyId).IsUnique();
         });
 
+        modelBuilder.Entity<WhatsAppRecommendation>(b =>
+        {
+            b.ToTable("WhatsAppRecommendations");
+            b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_WhatsAppRecommendations_SocietyId");
+            b.HasIndex(x => x.LeadId).HasDatabaseName("IX_WhatsAppRecommendations_LeadId");
+            b.Property(x => x.PhoneNumber).HasMaxLength(64);
+            b.Property(x => x.Message).HasMaxLength(4000);
+            b.Property(x => x.ActionType).HasConversion<int>();
+            b.Property(x => x.Priority).HasConversion<int>();
+            b.Property(x => x.Temperature).HasConversion<int>();
+            b.HasOne(x => x.Lead).WithMany().HasForeignKey(x => x.LeadId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<Lead>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<LeadActivity>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<Client>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
@@ -195,5 +213,6 @@ public sealed class AppDbContext : DbContext
         modelBuilder.Entity<QuoteItem>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<Notification>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<SocietySettings>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<WhatsAppRecommendation>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
     }
 }

@@ -110,10 +110,10 @@ builder.Services.AddSwaggerGen(c =>
 static string TranslateSwaggerTag(string controller) =>
     controller switch
     {
-        "Auth" => "Auth (Authentification client)",
+        "Auth" => "Auth (Authentification partenaire)",
         "PlatformAuth" => "PlatformAuth (Authentification plateforme)",
         "Users" => "Users (Utilisateurs)",
-        "Subscriptions" => "Subscriptions (Abonnements client)",
+        "Subscriptions" => "Subscriptions (Abonnements partenaire)",
         "PlatformSocieties" => "PlatformSocieties (Societes plateforme)",
         "PlatformSubscriptions" => "PlatformSubscriptions (Abonnements plateforme)",
         "PlatformSubscriptionPlans" => "PlatformSubscriptionPlans (Plans d'abonnement)",

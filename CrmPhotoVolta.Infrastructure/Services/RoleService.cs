@@ -28,6 +28,7 @@ public sealed class RoleService : IRoleService
                 Id = x.Id,
                 SocietyId = x.SocietyId,
                 Name = x.Name,
+                RoleType = x.RoleType,
                 IsSystemRole = x.IsSystemRole
             })
             .ToListAsync(cancellationToken);
@@ -39,6 +40,7 @@ public sealed class RoleService : IRoleService
         {
             SocietyId = societyId,
             Name = request.Name.Trim(),
+            RoleType = RoleType.Unknown,
             IsSystemRole = false,
             CreatedAt = DateTimeOffset.UtcNow
         };
@@ -51,6 +53,7 @@ public sealed class RoleService : IRoleService
             Id = role.Id,
             SocietyId = role.SocietyId,
             Name = role.Name,
+            RoleType = role.RoleType,
             IsSystemRole = role.IsSystemRole
         };
     }
@@ -72,6 +75,7 @@ public sealed class RoleService : IRoleService
             Id = role.Id,
             SocietyId = role.SocietyId,
             Name = role.Name,
+            RoleType = role.RoleType,
             IsSystemRole = role.IsSystemRole
         };
     }

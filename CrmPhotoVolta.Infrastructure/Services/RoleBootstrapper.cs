@@ -16,11 +16,18 @@ internal static class RoleBootstrapper
             {
                 SocietyId = societyId,
                 Name = "Admin",
+                RoleType = RoleType.Admin,
                 IsSystemRole = false,
                 CreatedAt = DateTimeOffset.UtcNow
             };
 
             db.Roles.Add(adminRole);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        else if (adminRole.RoleType != RoleType.Admin)
+        {
+            adminRole.RoleType = RoleType.Admin;
+            adminRole.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
         }
 

@@ -3,6 +3,7 @@ using System;
 using CrmPhotoVolta.Infrastructure.Data.App;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260414120000_AddLeadScoringColumns")]
+    partial class AddLeadScoringColumns
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -494,17 +497,11 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<int>("Temperature")
-                        .HasColumnType("integer");
-
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("UpdatedById")
                         .HasColumnType("uuid");
-
-                    b.Property<int>("Priority")
-                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
@@ -541,14 +538,12 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                     b.Property<string>("Notes")
                         .HasColumnType("text");
 
-                    b.Property<int?>("Rating")
-                        .HasColumnType("integer");
-
                     b.Property<Guid>("SocietyId")
                         .HasColumnType("uuid");
 
-                    b.Property<int>("Type")
-                        .HasColumnType("integer");
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1000,69 +995,6 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                     b.ToTable("SocietySettings", "app");
                 });
 
-            modelBuilder.Entity("CrmPhotoVolta.Domain.App.WhatsAppRecommendation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("ActionType")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uuid");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsSent")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid>("LeadId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Message")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<string>("PhoneNumber")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<int>("Priority")
-                        .HasColumnType("integer");
-
-                    b.Property<double>("Sd")
-                        .HasColumnType("double precision");
-
-                    b.Property<Guid>("SocietyId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Temperature")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("UpdatedById")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("LeadId")
-                        .HasDatabaseName("IX_WhatsAppRecommendations_LeadId");
-
-                    b.HasIndex("SocietyId")
-                        .HasDatabaseName("IX_WhatsAppRecommendations_SocietyId");
-
-                    b.ToTable("WhatsAppRecommendations", "app");
-                });
-
             modelBuilder.Entity("CrmPhotoVolta.Domain.App.CrmTask", b =>
                 {
                     b.HasOne("CrmPhotoVolta.Domain.App.Project", "Project")
@@ -1120,17 +1052,6 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                 {
                     b.HasOne("CrmPhotoVolta.Domain.App.Lead", "Lead")
                         .WithMany("Activities")
-                        .HasForeignKey("LeadId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Lead");
-                });
-
-            modelBuilder.Entity("CrmPhotoVolta.Domain.App.WhatsAppRecommendation", b =>
-                {
-                    b.HasOne("CrmPhotoVolta.Domain.App.Lead", "Lead")
-                        .WithMany()
                         .HasForeignKey("LeadId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();

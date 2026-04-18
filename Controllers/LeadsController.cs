@@ -137,4 +137,13 @@ public sealed class LeadsController : TenantCrmControllerBase
         var list = await _leads.GetTimelineAsync(societyId, id, cancellationToken);
         return Ok(ApiResponse.Ok(list));
     }
+
+    /// <summary>Force le recalcul LVI/SD (même logique qu’après activité / mise à jour).</summary>
+    [HttpPost("{id:guid}/score")]
+    public async Task<IActionResult> RecalculateScore(Guid id, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var updated = await _leads.RecalculateScoreAsync(societyId, id, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
+    }
 }

@@ -1,6 +1,8 @@
 using CrmPhotoVolta.Application.Common;
 using CrmPhotoVolta.Application.Crm.Leads;
 using CrmPhotoVolta.Application.Exceptions;
+using CrmPhotoVolta.Application.Automation;
+using CrmPhotoVolta.Application.Scoring;
 using CrmPhotoVolta.Domain.App;
 using CrmPhotoVolta.Infrastructure.Data.App;
 using CrmPhotoVolta.Infrastructure.Data.Core;
@@ -12,11 +14,19 @@ public sealed class LeadService : ILeadService
 {
     private readonly AppDbContext _app;
     private readonly CoreDbContext _core;
+    private readonly ILeadScoringService _scoring;
+    private readonly ILeadSdAutomationService _sdAutomation;
 
-    public LeadService(AppDbContext app, CoreDbContext core)
+    public LeadService(
+        AppDbContext app,
+        CoreDbContext core,
+        ILeadScoringService scoring,
+        ILeadSdAutomationService sdAutomation)
     {
         _app = app;
         _core = core;
+        _scoring = scoring;
+        _sdAutomation = sdAutomation;
     }
 
     public async Task<(IReadOnlyList<LeadListItemDto> Items, PaginationMeta Meta)> ListPagedAsync(
@@ -52,7 +62,12 @@ public sealed class LeadService : ILeadService
                 Phone = x.Phone,
                 Status = x.Status,
                 AssignedToUserId = x.AssignedToUserId,
-                CreatedAt = x.CreatedAt
+                CreatedAt = x.CreatedAt,
+                Lvi = x.Lvi,
+                Sd = x.Sd,
+                ScoredAt = x.ScoredAt,
+                Temperature = x.Temperature,
+                Priority = x.Priority
             })
             .ToListAsync(cancellationToken);
 
@@ -64,6 +79,9 @@ public sealed class LeadService : ILeadService
         var row = await _app.Leads.AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
+
+        if (row.ScoredAt is null)
+            return await RecalculateScoreAsync(societyId, leadId, cancellationToken);
 
         return Map(row);
     }
@@ -85,12 +103,21 @@ public sealed class LeadService : ILeadService
             Address = request.Address?.Trim(),
             Status = string.IsNullOrWhiteSpace(request.Status) ? LeadStatuses.New : request.Status.Trim(),
             AssignedToUserId = request.AssignedToUserId,
+            MonthlyBillEur = request.MonthlyBillEur,
+            EstimatedKw = request.EstimatedKw,
+            AverageRating = request.AverageRating ?? 0.0,
+            BonusQuoteRequested = request.BonusQuoteRequested ?? false,
+            BonusBudgetConfirmed = request.BonusBudgetConfirmed ?? false,
+            BonusDecisionMaker = request.BonusDecisionMaker ?? false,
+            BonusFinancingInterest = request.BonusFinancingInterest ?? false,
             CreatedAt = DateTimeOffset.UtcNow,
             CreatedById = actorUserId
         };
 
         _app.Leads.Add(lead);
         await _app.SaveChangesAsync(cancellationToken);
+
+        await ApplyScoreAsync(lead.Id, societyId, cancellationToken);
 
         return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == lead.Id, cancellationToken));
     }
@@ -112,9 +139,18 @@ public sealed class LeadService : ILeadService
         lead.Address = request.Address?.Trim();
         lead.Status = string.IsNullOrWhiteSpace(request.Status) ? LeadStatuses.New : request.Status.Trim();
         lead.AssignedToUserId = request.AssignedToUserId;
+        lead.MonthlyBillEur = request.MonthlyBillEur;
+        lead.EstimatedKw = request.EstimatedKw;
+        if (request.AverageRating is { } ar) lead.AverageRating = ar;
+        if (request.BonusQuoteRequested is { } bq) lead.BonusQuoteRequested = bq;
+        if (request.BonusBudgetConfirmed is { } bb) lead.BonusBudgetConfirmed = bb;
+        if (request.BonusDecisionMaker is { } bd) lead.BonusDecisionMaker = bd;
+        if (request.BonusFinancingInterest is { } bf) lead.BonusFinancingInterest = bf;
         lead.UpdatedAt = DateTimeOffset.UtcNow;
 
         await _app.SaveChangesAsync(cancellationToken);
+
+        await ApplyScoreAsync(leadId, societyId, cancellationToken);
 
         return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
     }
@@ -146,6 +182,7 @@ public sealed class LeadService : ILeadService
                 LeadId = x.LeadId,
                 Type = x.Type,
                 Notes = x.Notes,
+                Rating = x.Rating,
                 CreatedByUserId = x.CreatedByUserId,
                 CreatedAt = x.CreatedAt
             })
@@ -159,8 +196,11 @@ public sealed class LeadService : ILeadService
         AddLeadActivityRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.Type))
+        if ((int)request.Type == 0)
             throw new AppException("VALIDATION_ERROR", "Activity type is required.", 400);
+
+        if (request.Rating is { } rr && (rr < 1 || rr > 5))
+            throw new AppException("VALIDATION_ERROR", "Rating must be between 1 and 5.", 400);
 
         await EnsureLeadAsync(societyId, leadId, cancellationToken);
 
@@ -168,8 +208,9 @@ public sealed class LeadService : ILeadService
         {
             SocietyId = societyId,
             LeadId = leadId,
-            Type = request.Type.Trim(),
+            Type = request.Type,
             Notes = request.Notes?.Trim(),
+            Rating = request.Rating,
             CreatedByUserId = actorUserId,
             CreatedAt = DateTimeOffset.UtcNow,
             CreatedById = actorUserId
@@ -178,6 +219,8 @@ public sealed class LeadService : ILeadService
         _app.LeadActivities.Add(activity);
         await _app.SaveChangesAsync(cancellationToken);
 
+        await ApplyScoreAsync(leadId, societyId, cancellationToken);
+
         var row = await _app.LeadActivities.AsNoTracking().FirstAsync(x => x.Id == activity.Id, cancellationToken);
         return new LeadActivityDto
         {
@@ -185,6 +228,7 @@ public sealed class LeadService : ILeadService
             LeadId = row.LeadId,
             Type = row.Type,
             Notes = row.Notes,
+            Rating = row.Rating,
             CreatedByUserId = row.CreatedByUserId,
             CreatedAt = row.CreatedAt
         };
@@ -209,7 +253,7 @@ public sealed class LeadService : ILeadService
         {
             SocietyId = societyId,
             LeadId = leadId,
-            Type = "Assignment",
+            Type = LeadActivityType.Assignment,
             Notes = $"Assigned to user {request.UserId}",
             CreatedByUserId = actorUserId,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -217,6 +261,7 @@ public sealed class LeadService : ILeadService
         });
 
         await _app.SaveChangesAsync(cancellationToken);
+        await ApplyScoreAsync(leadId, societyId, cancellationToken);
         return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
     }
 
@@ -270,7 +315,7 @@ public sealed class LeadService : ILeadService
         {
             SocietyId = societyId,
             LeadId = leadId,
-            Type = "Converted",
+            Type = LeadActivityType.Converted,
             Notes = $"Client created: {client.Id}",
             CreatedByUserId = actorUserId,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -278,6 +323,8 @@ public sealed class LeadService : ILeadService
         });
 
         await _app.SaveChangesAsync(cancellationToken);
+
+        await ApplyScoreAsync(leadId, societyId, cancellationToken);
 
         return new ConvertLeadResultDto
         {
@@ -299,7 +346,7 @@ public sealed class LeadService : ILeadService
         {
             SocietyId = societyId,
             LeadId = leadId,
-            Type = "StatusChange",
+            Type = LeadActivityType.StatusChange,
             Notes = "Marked as Won",
             CreatedByUserId = actorUserId,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -307,6 +354,7 @@ public sealed class LeadService : ILeadService
         });
 
         await _app.SaveChangesAsync(cancellationToken);
+        await ApplyScoreAsync(leadId, societyId, cancellationToken);
         return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
     }
 
@@ -322,7 +370,7 @@ public sealed class LeadService : ILeadService
         {
             SocietyId = societyId,
             LeadId = leadId,
-            Type = "StatusChange",
+            Type = LeadActivityType.StatusChange,
             Notes = "Marked as Lost",
             CreatedByUserId = actorUserId,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -330,6 +378,7 @@ public sealed class LeadService : ILeadService
         });
 
         await _app.SaveChangesAsync(cancellationToken);
+        await ApplyScoreAsync(leadId, societyId, cancellationToken);
         return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
     }
 
@@ -344,7 +393,7 @@ public sealed class LeadService : ILeadService
             throw new AppException("VALIDATION_ERROR", "Note body is required.", 400);
 
         return await AddActivityAsync(societyId, leadId, actorUserId,
-            new AddLeadActivityRequest { Type = "Note", Notes = request.Body.Trim() },
+            new AddLeadActivityRequest { Type = LeadActivityType.Note, Notes = request.Body.Trim() },
             cancellationToken);
     }
 
@@ -355,18 +404,19 @@ public sealed class LeadService : ILeadService
     {
         await EnsureLeadAsync(societyId, leadId, cancellationToken);
 
-        var activities = await _app.LeadActivities.AsNoTracking()
+        var activityRows = await _app.LeadActivities.AsNoTracking()
             .Where(x => x.LeadId == leadId && x.SocietyId == societyId)
             .OrderByDescending(x => x.CreatedAt)
-            .Select(x => new LeadTimelineEntryDto
-            {
-                Kind = "activity",
-                At = x.CreatedAt,
-                Title = x.Type,
-                Detail = x.Notes,
-                RefId = x.Id
-            })
             .ToListAsync(cancellationToken);
+
+        var activities = activityRows.ConvertAll(x => new LeadTimelineEntryDto
+        {
+            Kind = "activity",
+            At = x.CreatedAt,
+            Title = x.Type.ToString(),
+            Detail = x.Notes,
+            RefId = x.Id
+        });
 
         var quotes = await _app.Quotes.AsNoTracking()
             .Where(x => x.SocietyId == societyId && x.LeadId == leadId)
@@ -382,6 +432,30 @@ public sealed class LeadService : ILeadService
             .ToListAsync(cancellationToken);
 
         return activities.Concat(quotes).OrderByDescending(x => x.At).ToList();
+    }
+
+    public async Task<LeadDto> RecalculateScoreAsync(Guid societyId, Guid leadId, CancellationToken cancellationToken = default)
+    {
+        await EnsureLeadAsync(societyId, leadId, cancellationToken);
+        await ApplyScoreAsync(leadId, societyId, cancellationToken);
+        var row = await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken);
+        return Map(row);
+    }
+
+    private async Task ApplyScoreAsync(Guid leadId, Guid societyId, CancellationToken cancellationToken)
+    {
+        var lead = await _app.Leads.FirstAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken);
+
+        var activities = await _app.LeadActivities.AsNoTracking()
+            .Where(x => x.LeadId == leadId && x.SocietyId == societyId)
+            .ToListAsync(cancellationToken);
+
+        var snapshot = _scoring.Calculate(lead, activities);
+        lead.ApplyScoring(in snapshot);
+
+        await _app.SaveChangesAsync(cancellationToken);
+
+        await _sdAutomation.ProcessAfterScoringAsync(lead, snapshot, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task EnsureLeadAsync(Guid societyId, Guid leadId, CancellationToken cancellationToken)
@@ -410,7 +484,30 @@ public sealed class LeadService : ILeadService
         Status = x.Status,
         AssignedToUserId = x.AssignedToUserId,
         CreatedAt = x.CreatedAt,
-        UpdatedAt = x.UpdatedAt
+        UpdatedAt = x.UpdatedAt,
+        MonthlyBillEur = x.MonthlyBillEur,
+        EstimatedKw = x.EstimatedKw,
+        AverageRating = x.AverageRating,
+        BonusQuoteRequested = x.BonusQuoteRequested,
+        BonusBudgetConfirmed = x.BonusBudgetConfirmed,
+        BonusDecisionMaker = x.BonusDecisionMaker,
+        BonusFinancingInterest = x.BonusFinancingInterest,
+        Lvi = x.Lvi,
+        Sd = x.Sd,
+        ScoredAt = x.ScoredAt,
+        Temperature = x.Temperature,
+        Priority = x.Priority,
+        ScoreBreakdown = x.ScoreBreakdownInteraction is null
+            ? null
+            : new LeadScoreBreakdownDto
+            {
+                Interaction = x.ScoreBreakdownInteraction ?? 0,
+                Intention = x.ScoreBreakdownIntention ?? 0,
+                Satisfaction = x.ScoreBreakdownSatisfaction ?? 0,
+                Activity = x.ScoreBreakdownActivity ?? 0,
+                Potential = x.ScoreBreakdownPotential ?? 0,
+                Penalties = x.ScoreBreakdownPenalties ?? 0
+            }
     };
 
     private static IQueryable<Lead> ApplySortAsc(IQueryable<Lead> query, string? sortBy) =>
@@ -419,6 +516,7 @@ public sealed class LeadService : ILeadService
             "name" => query.OrderBy(x => x.Name),
             "status" => query.OrderBy(x => x.Status),
             "email" => query.OrderBy(x => x.Email),
+            "lvi" => query.OrderBy(x => x.Lvi ?? double.MaxValue),
             _ => query.OrderBy(x => x.CreatedAt)
         };
 
@@ -428,6 +526,7 @@ public sealed class LeadService : ILeadService
             "name" => query.OrderByDescending(x => x.Name),
             "status" => query.OrderByDescending(x => x.Status),
             "email" => query.OrderByDescending(x => x.Email),
+            "lvi" => query.OrderByDescending(x => x.Lvi ?? -1.0),
             _ => query.OrderByDescending(x => x.CreatedAt)
         };
 }

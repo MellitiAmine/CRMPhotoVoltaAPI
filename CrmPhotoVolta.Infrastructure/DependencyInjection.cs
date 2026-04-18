@@ -16,6 +16,8 @@ using CrmPhotoVolta.Application.Crm.Quotes;
 using CrmPhotoVolta.Application.Crm.Reports;
 using CrmPhotoVolta.Application.Crm.Settings;
 using CrmPhotoVolta.Application.Permissions;
+using CrmPhotoVolta.Application.Automation;
+using CrmPhotoVolta.Application.Scoring;
 using CrmPhotoVolta.Application.Platform;
 using CrmPhotoVolta.Application.Platform.Auth;
 using CrmPhotoVolta.Application.Platform.Societies;
@@ -100,6 +102,8 @@ public static class DependencyInjection
         services.AddScoped<IMeWorkspaceService, MeWorkspaceService>();
         services.AddScoped<ICalendarQueryService, CalendarQueryService>();
         services.AddScoped<INotificationService, CrmNotificationService>();
+        services.AddScoped<ILeadScoringNotificationSink, LeadScoringNotificationSink>();
+        services.AddScoped<ILeadSdAutomationService, LeadSdAutomationService>();
         services.AddScoped<IDocumentService, DocumentService>();
         services.AddScoped<IReportService, ReportService>();
         services.AddScoped<ISocietySettingsService, SocietySettingsService>();

@@ -23,4 +23,7 @@ public interface ILeadService
     Task<LeadDto> MarkLostAsync(Guid societyId, Guid leadId, Guid actorUserId, CancellationToken cancellationToken = default);
     Task<LeadActivityDto> AddNoteAsync(Guid societyId, Guid leadId, Guid actorUserId, AddLeadNoteRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<LeadTimelineEntryDto>> GetTimelineAsync(Guid societyId, Guid leadId, CancellationToken cancellationToken = default);
+
+    /// <summary>Recalcule LVI/SD à partir des champs lead + activités (même logique qu’après mise à jour).</summary>
+    Task<LeadDto> RecalculateScoreAsync(Guid societyId, Guid leadId, CancellationToken cancellationToken = default);
 }

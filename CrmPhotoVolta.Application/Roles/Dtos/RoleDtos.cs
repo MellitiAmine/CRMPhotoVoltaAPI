@@ -1,3 +1,5 @@
+using CrmPhotoVolta.Domain.Core;
+
 namespace CrmPhotoVolta.Application.Roles.Dtos;
 
 public sealed class RoleDto
@@ -5,6 +7,7 @@ public sealed class RoleDto
     public Guid Id { get; init; }
     public Guid? SocietyId { get; init; }
     public string Name { get; init; } = string.Empty;
+    public RoleType RoleType { get; init; }
     public bool IsSystemRole { get; init; }
 }
 
