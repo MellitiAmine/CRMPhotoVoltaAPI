@@ -34,7 +34,7 @@ public sealed class DashboardService : IDashboardService
     {
         var leadsCount = await _app.Leads.CountAsync(x => x.SocietyId == societyId, cancellationToken);
         var converted = await _app.Leads.CountAsync(
-            x => x.SocietyId == societyId && (x.Status == LeadStatuses.Converted || x.Status == LeadStatuses.Won),
+            x => x.SocietyId == societyId && (x.Status == LeadStatuses.Converted || x.Status == LeadStatuses.Gagne),
             cancellationToken);
         var conversionRate = leadsCount == 0 ? 0 : Math.Round(100m * converted / leadsCount, 2);
 
@@ -114,7 +114,7 @@ public sealed class DashboardService : IDashboardService
             .ToListAsync(cancellationToken);
 
         var openLeads = await _app.Leads.CountAsync(
-            x => x.SocietyId == societyId && x.Status != LeadStatuses.Lost && x.Status != LeadStatuses.Converted && x.Status != LeadStatuses.Won,
+            x => x.SocietyId == societyId && x.Status != LeadStatuses.Perdu && x.Status != LeadStatuses.Converted && x.Status != LeadStatuses.Gagne,
             cancellationToken);
 
         return new DashboardPipelineDto

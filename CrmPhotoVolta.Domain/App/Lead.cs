@@ -6,7 +6,7 @@ public class Lead : SocietyScopedEntity
     public string? Phone { get; set; }
     public string? Email { get; set; }
     public string? Address { get; set; }
-    public string Status { get; set; } = LeadStatuses.New;
+    public string Status { get; set; } = LeadStatuses.Nouveau;
     public Guid? AssignedToUserId { get; set; }
 
     /// <summary>Legacy aggregate rating (1–5); scoring satisfaction uses activity ratings first.</summary>

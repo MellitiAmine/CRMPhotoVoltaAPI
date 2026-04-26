@@ -25,14 +25,15 @@ Un lead traverse des **statuts** qui reflètent l’avancement commercial. Voici
 
 | Statut | Explication simple |
 |--------|---------------------|
-| **New** | Nouveau lead : pas encore de prise de contact structurée. À traiter ou à qualifier. |
-| **Contacted** | Un premier contact a eu lieu (appel, message, etc.). Le lead n’est pas encore qualifié à fond. |
-| **Qualified** | Le besoin est clarifié (intérêt réel, faisabilité, budget approximatif…). Le lead mérite un vrai traitement commercial. |
-| **Proposal** | Une proposition ou un devis a été envoyée ou est en cours de préparation. |
-| **Negotiation** | Échanges sur prix, options, délais, financement — la vente est possible mais pas encore conclue. |
-| **Won** | Affaire **gagnée** : le client a signé ou validé le projet. |
-| **Lost** | Affaire **perdue** : le prospect a choisi un autre acteur ou a abandonné le projet. |
-| **Archived** | Lead **clos** et rangé (historique). Utile pour ne pas encombrer les vues actives tout en conservant la trace. |
+| **Nouveau** | Nouveau lead : pas encore de prise de contact structurée. À traiter ou à qualifier. |
+| **Contacté** | Un premier contact a eu lieu (appel, message, etc.). Le lead n’est pas encore qualifié à fond. |
+| **Qualifié** | Le besoin est clarifié (intérêt réel, faisabilité, budget approximatif…). Le lead mérite un vrai traitement commercial. |
+| **Proposition** | Une proposition ou un devis a été envoyée ou est en cours de préparation. |
+| **Négociation** | Échanges sur prix, options, délais, financement — la vente est possible mais pas encore conclue. |
+| **Gagné** | Affaire **gagnée** : le client a signé ou validé le projet. |
+| **Perdu** | Affaire **perdue** : le prospect a choisi un autre acteur ou a abandonné le projet. |
+| **Archivé** | Lead **clos** et rangé (historique). Utile pour ne pas encombrer les vues actives tout en conservant la trace. |
+| **Installation** | Le projet est validé et transmis à l'équipe technique pour l'installation physique des panneaux. |
 
 **À retenir** : faire évoluer le statut régulièrement améliore le suivi d’équipe et la fiabilité des tableaux de bord.
 

@@ -86,7 +86,7 @@ public sealed class ReportService : IReportService
     {
         var total = await _app.Leads.CountAsync(x => x.SocietyId == societyId, cancellationToken);
         var converted = await _app.Leads.CountAsync(
-            x => x.SocietyId == societyId && (x.Status == LeadStatuses.Converted || x.Status == LeadStatuses.Won),
+            x => x.SocietyId == societyId && (x.Status == LeadStatuses.Converted || x.Status == LeadStatuses.Gagne),
             cancellationToken);
 
         var pct = total == 0 ? 0 : Math.Round(100m * converted / total, 2);

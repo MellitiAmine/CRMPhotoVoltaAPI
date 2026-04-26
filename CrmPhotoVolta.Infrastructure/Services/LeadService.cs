@@ -101,7 +101,7 @@ public sealed class LeadService : ILeadService
             Phone = request.Phone?.Trim(),
             Email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim().ToLowerInvariant(),
             Address = request.Address?.Trim(),
-            Status = string.IsNullOrWhiteSpace(request.Status) ? LeadStatuses.New : request.Status.Trim(),
+            Status = string.IsNullOrWhiteSpace(request.Status) ? LeadStatuses.Nouveau : request.Status.Trim(),
             AssignedToUserId = request.AssignedToUserId,
             MonthlyBillEur = request.MonthlyBillEur,
             EstimatedKw = request.EstimatedKw,
@@ -137,7 +137,7 @@ public sealed class LeadService : ILeadService
         lead.Phone = request.Phone?.Trim();
         lead.Email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim().ToLowerInvariant();
         lead.Address = request.Address?.Trim();
-        lead.Status = string.IsNullOrWhiteSpace(request.Status) ? LeadStatuses.New : request.Status.Trim();
+        lead.Status = string.IsNullOrWhiteSpace(request.Status) ? LeadStatuses.Nouveau : request.Status.Trim();
         lead.AssignedToUserId = request.AssignedToUserId;
         lead.MonthlyBillEur = request.MonthlyBillEur;
         lead.EstimatedKw = request.EstimatedKw;
@@ -339,7 +339,7 @@ public sealed class LeadService : ILeadService
         var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
-        lead.Status = LeadStatuses.Won;
+        lead.Status = LeadStatuses.Gagne;
         lead.UpdatedAt = DateTimeOffset.UtcNow;
 
         _app.LeadActivities.Add(new LeadActivity
@@ -363,7 +363,7 @@ public sealed class LeadService : ILeadService
         var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
-        lead.Status = LeadStatuses.Lost;
+        lead.Status = LeadStatuses.Perdu;
         lead.UpdatedAt = DateTimeOffset.UtcNow;
 
         _app.LeadActivities.Add(new LeadActivity
