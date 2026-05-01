@@ -24,9 +24,13 @@ public sealed class QuotesController : TenantCrmControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] PaginationQuery query, CancellationToken cancellationToken)
+    public async Task<IActionResult> List(
+        [FromQuery] PaginationQuery query,
+        [FromQuery] Guid? societyId,
+        CancellationToken cancellationToken)
     {
-        var (items, meta) = await _quotes.ListPagedAsync(RequireSociety(), query.ToRequest(), cancellationToken);
+        var society = ResolveSocietyFromOptionalQuery(societyId);
+        var (items, meta) = await _quotes.ListPagedAsync(society, query.ToRequest(), cancellationToken);
         return Ok(ApiResponse.OkPaged(items, meta));
     }
 
@@ -39,9 +43,13 @@ public sealed class QuotesController : TenantCrmControllerBase
 
     [HttpPost]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status201Created)]
-    public async Task<IActionResult> Create([FromBody] CreateQuoteRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> Create(
+        [FromBody] CreateQuoteRequest request,
+        [FromQuery] Guid? societyId,
+        CancellationToken cancellationToken)
     {
-        var created = await _quotes.CreateAsync(RequireSociety(), request, cancellationToken);
+        var society = ResolveSocietyFromOptionalQuery(societyId);
+        var created = await _quotes.CreateAsync(society, request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(created));
     }
 

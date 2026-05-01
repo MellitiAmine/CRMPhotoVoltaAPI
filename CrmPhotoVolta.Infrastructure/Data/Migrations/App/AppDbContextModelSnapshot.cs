@@ -407,6 +407,60 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                     b.ToTable("InstallationPhotos", "app");
                 });
 
+            modelBuilder.Entity("CrmPhotoVolta.Domain.App.Item", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("DefaultPrice")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Reference")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("SocietyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("TvaRate")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedById")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SocietyId")
+                        .HasDatabaseName("IX_Items_SocietyId");
+
+                    b.ToTable("Items", "app");
+                });
+
             modelBuilder.Entity("CrmPhotoVolta.Domain.App.Lead", b =>
                 {
                     b.Property<Guid>("Id")
@@ -857,6 +911,9 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                     b.Property<Guid?>("ProjectId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("QuoteDate")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("QuoteNumber")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -882,7 +939,20 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                         .HasColumnType("character varying(200)");
 
                     b.Property<decimal>("TotalAmount")
-                        .HasColumnType("numeric");
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<decimal>("TotalHt")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<decimal>("TotalTtc")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<decimal>("TotalTva")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
 
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -929,11 +999,19 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<decimal>("Discount")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<Guid?>("ItemId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal>("Quantity")
-                        .HasColumnType("numeric");
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<Guid>("QuoteId")
                         .HasColumnType("uuid");
@@ -944,8 +1022,17 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
 
+                    b.Property<decimal>("TotalHt")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
+
+                    b.Property<decimal>("TvaRate")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
                     b.Property<decimal>("UnitPrice")
-                        .HasColumnType("numeric");
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)");
 
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -954,6 +1041,8 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
 
                     b.HasIndex("QuoteId")
                         .HasDatabaseName("IX_QuoteItems_QuoteId");
@@ -1207,11 +1296,18 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
 
             modelBuilder.Entity("CrmPhotoVolta.Domain.App.QuoteItem", b =>
                 {
+                    b.HasOne("CrmPhotoVolta.Domain.App.Item", "Item")
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("CrmPhotoVolta.Domain.App.Quote", "Quote")
                         .WithMany("Items")
                         .HasForeignKey("QuoteId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Item");
 
                     b.Navigation("Quote");
                 });

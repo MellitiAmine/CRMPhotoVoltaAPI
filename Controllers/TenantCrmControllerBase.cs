@@ -25,4 +25,13 @@ public abstract class TenantCrmControllerBase : ControllerBase
             throw new AppException("TENANT_REQUIRED", "Society context is required (JWT claim society_id).", StatusCodes.Status403Forbidden);
         }
     }
+
+    /// <summary>When <paramref name="societyIdFromQuery"/> is set, it must match the authenticated tenant (no cross-tenant access).</summary>
+    protected Guid ResolveSocietyFromOptionalQuery(Guid? societyIdFromQuery)
+    {
+        var fromToken = RequireSociety();
+        if (societyIdFromQuery is { } q && q != fromToken)
+            throw new AppException("TENANT_MISMATCH", "societyId does not match authenticated tenant.", StatusCodes.Status403Forbidden);
+        return fromToken;
+    }
 }

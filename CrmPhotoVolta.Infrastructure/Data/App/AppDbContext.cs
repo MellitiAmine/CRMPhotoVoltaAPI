@@ -28,6 +28,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<InstallationPhoto> InstallationPhotos => Set<InstallationPhoto>();
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<CalendarEvent> Events => Set<CalendarEvent>();
+    public DbSet<Item> Items => Set<Item>();
     public DbSet<Quote> Quotes => Set<Quote>();
     public DbSet<QuoteItem> QuoteItems => Set<QuoteItem>();
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -144,6 +145,17 @@ public sealed class AppDbContext : DbContext
             b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Events_SocietyId");
         });
 
+        modelBuilder.Entity<Item>(b =>
+        {
+            b.ToTable("Items");
+            b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Items_SocietyId");
+            b.Property(x => x.Name).HasMaxLength(200);
+            b.Property(x => x.Reference).HasMaxLength(120);
+            b.Property(x => x.Unit).HasMaxLength(32);
+            b.Property(x => x.DefaultPrice).HasPrecision(18, 3);
+            b.Property(x => x.TvaRate).HasPrecision(5, 2);
+        });
+
         modelBuilder.Entity<Quote>(b =>
         {
             b.ToTable("Quotes");
@@ -153,6 +165,10 @@ public sealed class AppDbContext : DbContext
             b.Property(x => x.Title).HasMaxLength(200);
             b.Property(x => x.Status).HasConversion<string>().HasMaxLength(40);
             b.Property(x => x.Currency).HasMaxLength(8);
+            b.Property(x => x.TotalAmount).HasPrecision(18, 3);
+            b.Property(x => x.TotalHt).HasPrecision(18, 3);
+            b.Property(x => x.TotalTva).HasPrecision(18, 3);
+            b.Property(x => x.TotalTtc).HasPrecision(18, 3);
             b.HasOne(x => x.Lead).WithMany().HasForeignKey(x => x.LeadId).OnDelete(DeleteBehavior.SetNull);
             b.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.SetNull);
             b.HasOne(x => x.Deal).WithMany().HasForeignKey(x => x.DealId).OnDelete(DeleteBehavior.SetNull);
@@ -165,6 +181,12 @@ public sealed class AppDbContext : DbContext
             b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_QuoteItems_SocietyId");
             b.HasIndex(x => x.QuoteId).HasDatabaseName("IX_QuoteItems_QuoteId");
             b.Property(x => x.Description).HasMaxLength(500);
+            b.Property(x => x.Quantity).HasPrecision(18, 2);
+            b.Property(x => x.UnitPrice).HasPrecision(18, 3);
+            b.Property(x => x.Discount).HasPrecision(5, 2);
+            b.Property(x => x.TvaRate).HasPrecision(5, 2);
+            b.Property(x => x.TotalHt).HasPrecision(18, 3);
+            b.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.SetNull);
             b.HasOne(x => x.Quote).WithMany(x => x.Items).HasForeignKey(x => x.QuoteId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -209,6 +231,7 @@ public sealed class AppDbContext : DbContext
         modelBuilder.Entity<InstallationPhoto>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<Document>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<CalendarEvent>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<Item>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<Quote>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<QuoteItem>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<Notification>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));

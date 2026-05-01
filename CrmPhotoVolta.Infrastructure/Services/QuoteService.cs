@@ -47,6 +47,9 @@ public sealed class QuoteService : IQuoteService
                 Title = x.Title,
                 Status = x.Status,
                 TotalAmount = x.TotalAmount,
+                TotalHt = x.TotalHt,
+                TotalTva = x.TotalTva,
+                TotalTtc = x.TotalTtc,
                 Currency = x.Currency,
                 LeadId = x.LeadId,
                 ClientId = x.ClientId,
@@ -87,12 +90,12 @@ public sealed class QuoteService : IQuoteService
             Status = QuoteStatus.Draft,
             Currency = string.IsNullOrWhiteSpace(request.Currency) ? "TND" : request.Currency.Trim().ToUpperInvariant(),
             ValidUntil = request.ValidUntil,
+            QuoteDate = DateTimeOffset.UtcNow,
             CreatedAt = DateTimeOffset.UtcNow
         };
 
         _app.Quotes.Add(quote);
-        ReplaceItems(quote, societyId, request.Items);
-        quote.TotalAmount = SumItems(quote.Items);
+        await ReplaceItemsAsync(quote, societyId, request.Items, cancellationToken);
         await _app.SaveChangesAsync(cancellationToken);
 
         return Map(await ReloadQuoteAsync(quote.Id, cancellationToken));
@@ -122,8 +125,8 @@ public sealed class QuoteService : IQuoteService
         quote.UpdatedAt = DateTimeOffset.UtcNow;
 
         _app.QuoteItems.RemoveRange(quote.Items);
-        ReplaceItems(quote, societyId, request.Items);
-        quote.TotalAmount = SumItems(quote.Items);
+        quote.Items.Clear();
+        await ReplaceItemsAsync(quote, societyId, request.Items, cancellationToken);
 
         await _app.SaveChangesAsync(cancellationToken);
 
@@ -243,30 +246,67 @@ public sealed class QuoteService : IQuoteService
     private async Task<Quote> ReloadQuoteAsync(Guid id, CancellationToken cancellationToken) =>
         await _app.Quotes.AsNoTracking().Include(x => x.Items).FirstAsync(x => x.Id == id, cancellationToken);
 
-    private static void ReplaceItems(Quote quote, Guid societyId, IReadOnlyList<QuoteItemWriteDto> items)
+    private async Task ReplaceItemsAsync(Quote quote, Guid societyId, IReadOnlyList<QuoteItemWriteDto> items, CancellationToken cancellationToken)
     {
+        var itemIds = items.Where(x => x.ItemId.HasValue).Select(x => x.ItemId!.Value).Distinct().ToList();
+        var catalog = itemIds.Count == 0
+            ? new Dictionary<Guid, Item>()
+            : await _app.Items.AsNoTracking()
+                .Where(x => itemIds.Contains(x.Id) && x.SocietyId == societyId)
+                .ToDictionaryAsync(x => x.Id, cancellationToken);
+
         var order = 0;
         foreach (var line in items)
         {
-            if (string.IsNullOrWhiteSpace(line.Description))
+            if (!line.ItemId.HasValue && string.IsNullOrWhiteSpace(line.Description))
                 continue;
 
-            quote.Items.Add(new QuoteItem
+            var discount = line.Discount ?? 0;
+            if (discount < 0 || discount > 100)
+                throw new AppException("VALIDATION_ERROR", "Discount must be between 0 and 100.", 400);
+
+            var unitPrice = line.UnitPrice;
+            decimal tvaRate;
+            string desc;
+            Guid? itemId = line.ItemId;
+
+            if (line.ItemId is { } iid)
+            {
+                if (!catalog.TryGetValue(iid, out var cat))
+                    throw new AppException("ITEM_NOT_FOUND", "Item not found.", 404);
+
+                if (unitPrice <= 0)
+                    unitPrice = cat.DefaultPrice;
+                tvaRate = line.TvaRate ?? cat.TvaRate;
+                desc = string.IsNullOrWhiteSpace(line.Description) ? cat.Name : line.Description.Trim();
+            }
+            else
+            {
+                tvaRate = line.TvaRate ?? 0;
+                desc = line.Description.Trim();
+            }
+
+            var qty = line.Quantity <= 0 ? 1 : line.Quantity;
+            var entity = new QuoteItem
             {
                 SocietyId = societyId,
                 QuoteId = quote.Id,
-                Description = line.Description.Trim(),
-                Quantity = line.Quantity <= 0 ? 1 : line.Quantity,
-                UnitPrice = line.UnitPrice,
+                ItemId = itemId,
+                Description = desc,
+                Quantity = qty,
+                UnitPrice = unitPrice,
+                Discount = discount,
+                TvaRate = tvaRate,
                 SortOrder = line.SortOrder != 0 ? line.SortOrder : order,
                 CreatedAt = DateTimeOffset.UtcNow
-            });
+            };
+            QuoteTotalsCalculator.RecomputeLine(entity);
+            quote.Items.Add(entity);
             order++;
         }
-    }
 
-    private static decimal SumItems(IEnumerable<QuoteItem> items) =>
-        items.Sum(x => x.Quantity * x.UnitPrice);
+        QuoteTotalsCalculator.ApplyQuoteAggregates(quote);
+    }
 
     private async Task<string> NextQuoteNumberAsync(Guid societyId, CancellationToken cancellationToken)
     {
@@ -309,6 +349,10 @@ public sealed class QuoteService : IQuoteService
         Status = q.Status,
         Currency = q.Currency,
         TotalAmount = q.TotalAmount,
+        TotalHt = q.TotalHt,
+        TotalTva = q.TotalTva,
+        TotalTtc = q.TotalTtc,
+        QuoteDate = q.QuoteDate,
         ValidUntil = q.ValidUntil,
         LeadId = q.LeadId,
         ClientId = q.ClientId,
@@ -323,10 +367,14 @@ public sealed class QuoteService : IQuoteService
             .Select(x => new QuoteItemDto
             {
                 Id = x.Id,
+                ItemId = x.ItemId,
                 Description = x.Description,
                 Quantity = x.Quantity,
                 UnitPrice = x.UnitPrice,
-                LineTotal = x.Quantity * x.UnitPrice,
+                Discount = x.Discount,
+                TvaRate = x.TvaRate,
+                TotalHt = x.TotalHt,
+                LineTotal = x.TotalHt,
                 SortOrder = x.SortOrder
             })
             .ToList()

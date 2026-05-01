@@ -5,9 +5,14 @@ namespace CrmPhotoVolta.Application.Crm.Quotes;
 public sealed class QuoteItemDto
 {
     public Guid Id { get; init; }
+    public Guid? ItemId { get; init; }
     public string Description { get; init; } = string.Empty;
     public decimal Quantity { get; init; }
     public decimal UnitPrice { get; init; }
+    public decimal Discount { get; init; }
+    public decimal TvaRate { get; init; }
+    public decimal TotalHt { get; init; }
+    /// <summary>Same as <see cref="TotalHt"/> (excl. VAT).</summary>
     public decimal LineTotal { get; init; }
     public int SortOrder { get; init; }
 }
@@ -19,6 +24,9 @@ public sealed class QuoteListItemDto
     public string Title { get; init; } = string.Empty;
     public QuoteStatus Status { get; init; }
     public decimal TotalAmount { get; init; }
+    public decimal TotalHt { get; init; }
+    public decimal TotalTva { get; init; }
+    public decimal TotalTtc { get; init; }
     public string Currency { get; init; } = "TND";
     public Guid? LeadId { get; init; }
     public Guid? ClientId { get; init; }
@@ -33,6 +41,10 @@ public sealed class QuoteDto
     public QuoteStatus Status { get; init; }
     public string Currency { get; init; } = "TND";
     public decimal TotalAmount { get; init; }
+    public decimal TotalHt { get; init; }
+    public decimal TotalTva { get; init; }
+    public decimal TotalTtc { get; init; }
+    public DateTimeOffset? QuoteDate { get; init; }
     public DateOnly? ValidUntil { get; init; }
     public Guid? LeadId { get; init; }
     public Guid? ClientId { get; init; }
@@ -47,9 +59,12 @@ public sealed class QuoteDto
 
 public sealed class QuoteItemWriteDto
 {
+    public Guid? ItemId { get; init; }
     public string Description { get; init; } = string.Empty;
     public decimal Quantity { get; init; } = 1;
     public decimal UnitPrice { get; init; }
+    public decimal? Discount { get; init; }
+    public decimal? TvaRate { get; init; }
     public int SortOrder { get; init; }
 }
 

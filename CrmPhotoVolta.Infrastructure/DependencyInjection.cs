@@ -12,6 +12,7 @@ using CrmPhotoVolta.Application.Crm.Me;
 using CrmPhotoVolta.Application.Crm.Notifications;
 using CrmPhotoVolta.Application.Crm.Pipeline;
 using CrmPhotoVolta.Application.Crm.Projects;
+using CrmPhotoVolta.Application.Crm.Items;
 using CrmPhotoVolta.Application.Crm.Quotes;
 using CrmPhotoVolta.Application.Crm.Reports;
 using CrmPhotoVolta.Application.Crm.Settings;
@@ -97,6 +98,8 @@ public static class DependencyInjection
 
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<IQuoteService, QuoteService>();
+        services.AddScoped<IQuoteItemLineService, QuoteItemLineService>();
+        services.AddScoped<IItemService, ItemService>();
         services.AddScoped<IPipelineStageService, PipelineStageService>();
         services.AddScoped<IInstallationWorkflowService, InstallationWorkflowService>();
         services.AddScoped<IMeWorkspaceService, MeWorkspaceService>();
