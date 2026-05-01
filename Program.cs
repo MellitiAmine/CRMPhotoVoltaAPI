@@ -162,6 +162,11 @@ using (var scope = app.Services.CreateScope())
         }
         else
         {
+            await coreDb.Database.MigrateAsync(CancellationToken.None);
+            await appDb.Database.MigrateAsync(CancellationToken.None);
+            await platformDb.Database.MigrateAsync(CancellationToken.None);
+            app.Logger.LogInformation("PostgreSQL migrations applied for Core, App, and Platform schemas.");
+
             await DatabaseSeeder.EnsureSeedAsync(coreDb, CancellationToken.None);
             await PlatformDatabaseSeeder.EnsureSeedAsync(platformDb, CancellationToken.None);
 
@@ -199,7 +204,9 @@ app.UseMiddleware<ExceptionHandlingMiddleware>();
 // {
 app.UseSwagger();
 app.UseSwaggerUI();
-app.UseHttpsRedirection();
+// Official .NET images set DOTNET_RUNNING_IN_CONTAINER=true; HTTPS redirect breaks plain HTTP in Docker.
+if (Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") != "true")
+    app.UseHttpsRedirection();
 // }
 
 var uploadsRoot = Path.Combine(builder.Environment.ContentRootPath, "uploads");

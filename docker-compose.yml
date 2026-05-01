@@ -1,0 +1,47 @@
+# Usage: from this folder run: docker compose up --build
+# API: http://localhost:8080/swagger  |  Health: http://localhost:8080/api/health
+# First start: waits for Postgres, applies EF migrations (Core / App / Platform), then runs existing seeders.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: crmphotovolta
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d crmphotovolta"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      # Same DB for all three EF contexts (schemas: core, app, platform)
+      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=crmphotovolta;Username=postgres;Password=postgres"
+      # Demo accounts (override in production)
+      PlatformSeed__Enabled: "true"
+      PlatformSeed__PlatformAdminEmail: "plateforme@crm.local"
+      PlatformSeed__PlatformAdminPassword: "ChangeMe123!"
+      PlatformSeed__DemoFreeSocietyAdminEmail: "admin.essai@crm.local"
+      PlatformSeed__DemoFreeSocietyAdminPassword: "Demo123!"
+      PlatformSeed__DemoPaidSocietyAdminEmail: "admin.payant@crm.local"
+      PlatformSeed__DemoPaidSocietyAdminPassword: "Demo123!"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
