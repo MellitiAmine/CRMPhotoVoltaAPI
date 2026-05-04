@@ -38,4 +38,16 @@ public sealed class ItemsController : TenantCrmControllerBase
         var created = await _items.CreateAsync(society, request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(created));
     }
+
+    /// <summary>Soft-delete a catalog item (same society only).</summary>
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(
+        Guid id,
+        [FromQuery] Guid? societyId,
+        CancellationToken cancellationToken)
+    {
+        var society = ResolveSocietyFromOptionalQuery(societyId);
+        await _items.DeleteAsync(society, id, cancellationToken);
+        return Ok(ApiResponse.Ok(new { deleted = true }));
+    }
 }

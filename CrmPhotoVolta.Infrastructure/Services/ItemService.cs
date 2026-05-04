@@ -51,6 +51,21 @@ public sealed class ItemService : IItemService
         return list.ConvertAll(Map);
     }
 
+    public async Task DeleteAsync(Guid societyId, Guid itemId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _app.Items.FirstOrDefaultAsync(
+                x => x.Id == itemId && x.SocietyId == societyId,
+                cancellationToken)
+            ?? throw new AppException("ITEM_NOT_FOUND", "Item not found.", 404);
+
+        if (entity.IsDeleted)
+            return;
+
+        entity.IsDeleted = true;
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
+        await _app.SaveChangesAsync(cancellationToken);
+    }
+
     private static ItemDto Map(Item x) => new()
     {
         Id = x.Id,

@@ -125,6 +125,8 @@ Voir aussi `guide/ScoringLead.md`.
 | Accept / reject | `POST` `/api/v1/quotes/{id}/accept`, `.../reject` |
 | Create project from accepted quote | `POST` `/api/v1/quotes/{id}/convert-to-project` |
 
+**Catalog items, HT/TVA/TTC, and line-by-line APIs** (`/api/v1/items`, `/api/v1/quote-items`) are documented in [ItemsAndQuotes.md](ItemsAndQuotes.md).
+
 **Statuses** are enums in JSON, e.g. `Draft`, `Sent`, `Accepted`, `Rejected`, `Converted` (see `QuoteStatus` in domain).
 
 ### 5.5 Projects
