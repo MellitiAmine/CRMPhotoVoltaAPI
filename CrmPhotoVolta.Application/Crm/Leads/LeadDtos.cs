@@ -8,14 +8,19 @@ public sealed class LeadListItemDto
     public string Name { get; init; } = string.Empty;
     public string? Email { get; init; }
     public string? Phone { get; init; }
+    public string? Address { get; init; }
     public string Status { get; init; } = string.Empty;
     public Guid? AssignedToUserId { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
+    public double? MonthlyBillEur { get; init; }
+    public double? EstimatedKw { get; init; }
+    public double? MontantEstimé { get; init; }
     public double? Lvi { get; init; }
     public double? Sd { get; init; }
     public DateTimeOffset? ScoredAt { get; init; }
     public LeadTemperature Temperature { get; init; }
     public LeadPriority Priority { get; init; }
+    public List<string> Tags { get; init; } = new();
 }
 
 public sealed class LeadScoreBreakdownDto
@@ -26,6 +31,15 @@ public sealed class LeadScoreBreakdownDto
     public double Activity { get; init; }
     public double Potential { get; init; }
     public double Penalties { get; init; }
+}
+
+public sealed class LeadRecommendationDto
+{
+    public string Code { get; init; } = string.Empty;
+    public string Title { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
+    public string ActionLabel { get; init; } = string.Empty;
+    public string Priority { get; init; } = "Medium";
 }
 
 public sealed class LeadDto
@@ -41,6 +55,7 @@ public sealed class LeadDto
     public DateTimeOffset? UpdatedAt { get; init; }
     public double? MonthlyBillEur { get; init; }
     public double? EstimatedKw { get; init; }
+    public double? MontantEstimé { get; init; }
     public double AverageRating { get; init; }
     public bool BonusQuoteRequested { get; init; }
     public bool BonusBudgetConfirmed { get; init; }
@@ -50,8 +65,10 @@ public sealed class LeadDto
     public double? Sd { get; init; }
     public DateTimeOffset? ScoredAt { get; init; }
     public LeadScoreBreakdownDto? ScoreBreakdown { get; init; }
+    public List<LeadRecommendationDto> Recommendations { get; init; } = new();
     public LeadTemperature Temperature { get; init; }
     public LeadPriority Priority { get; init; }
+    public List<string> Tags { get; init; } = new();
 }
 
 public sealed class CreateLeadRequest
@@ -64,6 +81,7 @@ public sealed class CreateLeadRequest
     public Guid? AssignedToUserId { get; init; }
     public double? MonthlyBillEur { get; init; }
     public double? EstimatedKw { get; init; }
+    public double? MontantEstimé { get; init; }
     public double? AverageRating { get; init; }
     public bool? BonusQuoteRequested { get; init; }
     public bool? BonusBudgetConfirmed { get; init; }
@@ -81,6 +99,7 @@ public sealed class UpdateLeadRequest
     public Guid? AssignedToUserId { get; init; }
     public double? MonthlyBillEur { get; init; }
     public double? EstimatedKw { get; init; }
+    public double? MontantEstimé { get; init; }
     public double? AverageRating { get; init; }
     public bool? BonusQuoteRequested { get; init; }
     public bool? BonusBudgetConfirmed { get; init; }
@@ -136,4 +155,26 @@ public sealed class LeadTimelineEntryDto
     public string Title { get; init; } = string.Empty;
     public string? Detail { get; init; }
     public Guid? RefId { get; init; }
+}
+
+/// <summary>Request to manually change a lead's status (also applies minimum score floor).</summary>
+public sealed class ChangeLeadStatusRequest
+{
+    public string Status { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// Request to manually change a lead's temperature (Hot/High/Medium/Low/Cold).
+/// The backend bumps LVI and SD to the minimum floor for the chosen temperature,
+/// and records UpdatedById + UpdatedAt for audit tracking.
+/// </summary>
+public sealed class ChangeLeadTemperatureRequest
+{
+    public LeadTemperature Temperature { get; init; }
+}
+
+/// <summary>Request to add a manual tag to a lead.</summary>
+public sealed class AddLeadTagRequest
+{
+    public string Tag { get; init; } = string.Empty;
 }

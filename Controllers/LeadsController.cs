@@ -146,4 +146,42 @@ public sealed class LeadsController : TenantCrmControllerBase
         var updated = await _leads.RecalculateScoreAsync(societyId, id, cancellationToken);
         return Ok(ApiResponse.Ok(updated));
     }
+
+    /// <summary>
+    /// Change manuellement la temperature (Hot/High/Medium/Low/Cold).
+    /// Applique le score minimum et trace UpdatedById / UpdatedAt.
+    /// </summary>
+    [HttpPatch("{id:guid}/temperature")]
+    public async Task<IActionResult> ChangeTemperature(Guid id, [FromBody] ChangeLeadTemperatureRequest request, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var updated = await _leads.ChangeTemperatureAsync(societyId, id, actorId, request, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
+    }
+
+    [HttpPatch("{id:guid}/status")]
+    public async Task<IActionResult> ChangeStatus(Guid id, [FromBody] ChangeLeadStatusRequest request, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var updated = await _leads.ChangeStatusAsync(societyId, id, actorId, request, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
+    }
+
+    [HttpPost("{id:guid}/tags")]
+    public async Task<IActionResult> AddTag(Guid id, [FromBody] AddLeadTagRequest request, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var updated = await _leads.AddTagAsync(societyId, id, request, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
+    }
+
+    [HttpDelete("{id:guid}/tags/{tag}")]
+    public async Task<IActionResult> RemoveTag(Guid id, string tag, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var updated = await _leads.RemoveTagAsync(societyId, id, tag, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
+    }
 }

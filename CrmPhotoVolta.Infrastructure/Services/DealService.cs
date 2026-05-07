@@ -1,5 +1,6 @@
 using CrmPhotoVolta.Application.Common;
 using CrmPhotoVolta.Application.Crm.Deals;
+using CrmPhotoVolta.Application.Crm.Leads;
 using CrmPhotoVolta.Application.Exceptions;
 using CrmPhotoVolta.Domain.App;
 using CrmPhotoVolta.Infrastructure.Data.App;
@@ -58,7 +59,9 @@ public sealed class DealService : IDealService
 
     public async Task<DealDto> GetAsync(Guid societyId, Guid dealId, CancellationToken cancellationToken = default)
     {
-        var row = await _app.Deals.AsNoTracking()
+        var row = await _app.Deals
+            .AsNoTracking()
+            .Include(x => x.Lead)
             .FirstOrDefaultAsync(x => x.Id == dealId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("DEAL_NOT_FOUND", "Deal not found.", 404);
 
@@ -90,7 +93,7 @@ public sealed class DealService : IDealService
         _app.Deals.Add(deal);
         await _app.SaveChangesAsync(cancellationToken);
 
-        return Map(await _app.Deals.AsNoTracking().FirstAsync(x => x.Id == deal.Id, cancellationToken));
+        return Map(await LoadDealWithLeadAsync(societyId, deal.Id, cancellationToken));
     }
 
     public async Task<DealDto> UpdateAsync(Guid societyId, Guid dealId, UpdateDealRequest request, CancellationToken cancellationToken = default)
@@ -116,7 +119,7 @@ public sealed class DealService : IDealService
 
         await _app.SaveChangesAsync(cancellationToken);
 
-        return Map(await _app.Deals.AsNoTracking().FirstAsync(x => x.Id == dealId, cancellationToken));
+        return Map(await LoadDealWithLeadAsync(societyId, dealId, cancellationToken));
     }
 
     public async Task DeleteAsync(Guid societyId, Guid dealId, CancellationToken cancellationToken = default)
@@ -158,8 +161,40 @@ public sealed class DealService : IDealService
         Stage = x.Stage,
         AssignedToUserId = x.AssignedToUserId,
         CreatedAt = x.CreatedAt,
-        UpdatedAt = x.UpdatedAt
+        UpdatedAt = x.UpdatedAt,
+        LeadInfo = x.Lead is null
+            ? null
+            : new DealLeadInfoDto
+            {
+                Id = x.Lead.Id,
+                Name = x.Lead.Name,
+                Status = x.Lead.Status,
+                Lvi = x.Lead.Lvi,
+                Sd = x.Lead.Sd,
+                ScoredAt = x.Lead.ScoredAt,
+                Temperature = x.Lead.Temperature,
+                Priority = x.Lead.Priority,
+                ScoreBreakdown = x.Lead.ScoreBreakdownInteraction is null
+                    ? null
+                    : new LeadScoreBreakdownDto
+                    {
+                        Interaction = x.Lead.ScoreBreakdownInteraction ?? 0,
+                        Intention = x.Lead.ScoreBreakdownIntention ?? 0,
+                        Satisfaction = x.Lead.ScoreBreakdownSatisfaction ?? 0,
+                        Activity = x.Lead.ScoreBreakdownActivity ?? 0,
+                        Potential = x.Lead.ScoreBreakdownPotential ?? 0,
+                        Penalties = x.Lead.ScoreBreakdownPenalties ?? 0
+                    }
+            }
     };
+
+    private async Task<Deal> LoadDealWithLeadAsync(Guid societyId, Guid dealId, CancellationToken cancellationToken)
+    {
+        return await _app.Deals
+            .AsNoTracking()
+            .Include(x => x.Lead)
+            .FirstAsync(x => x.Id == dealId && x.SocietyId == societyId, cancellationToken);
+    }
 
     private static IQueryable<Deal> ApplySortAsc(IQueryable<Deal> query, string? sortBy) =>
         sortBy?.ToLowerInvariant() switch

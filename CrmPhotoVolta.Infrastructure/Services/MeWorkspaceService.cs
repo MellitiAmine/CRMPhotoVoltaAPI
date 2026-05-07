@@ -55,21 +55,36 @@ public sealed class MeWorkspaceService : IMeWorkspaceService
         DateTimeOffset to,
         CancellationToken cancellationToken = default)
     {
-        return await _app.Events.AsNoTracking()
+        var raw = await _app.Events.AsNoTracking()
             .Where(x =>
                 x.SocietyId == societyId &&
-                x.AssignedToUserId == userId &&
                 x.StartDate >= from &&
                 x.StartDate <= to)
             .OrderBy(x => x.StartDate)
+            .Select(x => new
+            {
+                x.Id,
+                x.Title,
+                x.Type,
+                x.StartDate,
+                x.EndDate,
+                x.AssignedToUserId,
+                x.Participants,
+                x.LeadId
+            })
+            .ToListAsync(cancellationToken);
+
+        return raw
+            .Where(x => x.AssignedToUserId == userId || x.Participants.Contains(userId))
             .Select(x => new MyScheduleEntryDto
             {
                 Id = x.Id,
                 Title = x.Title,
                 Type = x.Type,
                 StartDate = x.StartDate,
-                EndDate = x.EndDate
+                EndDate = x.EndDate,
+                LeadId = x.LeadId
             })
-            .ToListAsync(cancellationToken);
+            .ToList();
     }
 }

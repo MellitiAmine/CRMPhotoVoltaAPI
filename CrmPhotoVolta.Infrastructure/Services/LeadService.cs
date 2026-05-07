@@ -60,14 +60,19 @@ public sealed class LeadService : ILeadService
                 Name = x.Name,
                 Email = x.Email,
                 Phone = x.Phone,
+                Address = x.Address,
                 Status = x.Status,
                 AssignedToUserId = x.AssignedToUserId,
                 CreatedAt = x.CreatedAt,
+                MonthlyBillEur = x.MonthlyBillEur,
+                EstimatedKw = x.EstimatedKw,
+                MontantEstimé = x.MontantEstimé,
                 Lvi = x.Lvi,
                 Sd = x.Sd,
                 ScoredAt = x.ScoredAt,
                 Temperature = x.Temperature,
-                Priority = x.Priority
+                Priority = x.Priority,
+                Tags = x.Tags
             })
             .ToListAsync(cancellationToken);
 
@@ -105,6 +110,7 @@ public sealed class LeadService : ILeadService
             AssignedToUserId = request.AssignedToUserId,
             MonthlyBillEur = request.MonthlyBillEur,
             EstimatedKw = request.EstimatedKw,
+            MontantEstimé = request.MontantEstimé,
             AverageRating = request.AverageRating ?? 0.0,
             BonusQuoteRequested = request.BonusQuoteRequested ?? false,
             BonusBudgetConfirmed = request.BonusBudgetConfirmed ?? false,
@@ -141,6 +147,7 @@ public sealed class LeadService : ILeadService
         lead.AssignedToUserId = request.AssignedToUserId;
         lead.MonthlyBillEur = request.MonthlyBillEur;
         lead.EstimatedKw = request.EstimatedKw;
+        lead.MontantEstimé = request.MontantEstimé;
         if (request.AverageRating is { } ar) lead.AverageRating = ar;
         if (request.BonusQuoteRequested is { } bq) lead.BonusQuoteRequested = bq;
         if (request.BonusBudgetConfirmed is { } bb) lead.BonusBudgetConfirmed = bb;
@@ -487,6 +494,7 @@ public sealed class LeadService : ILeadService
         UpdatedAt = x.UpdatedAt,
         MonthlyBillEur = x.MonthlyBillEur,
         EstimatedKw = x.EstimatedKw,
+        MontantEstimé = x.MontantEstimé,
         AverageRating = x.AverageRating,
         BonusQuoteRequested = x.BonusQuoteRequested,
         BonusBudgetConfirmed = x.BonusBudgetConfirmed,
@@ -497,6 +505,7 @@ public sealed class LeadService : ILeadService
         ScoredAt = x.ScoredAt,
         Temperature = x.Temperature,
         Priority = x.Priority,
+        Tags = x.Tags,
         ScoreBreakdown = x.ScoreBreakdownInteraction is null
             ? null
             : new LeadScoreBreakdownDto
@@ -507,8 +516,384 @@ public sealed class LeadService : ILeadService
                 Activity = x.ScoreBreakdownActivity ?? 0,
                 Potential = x.ScoreBreakdownPotential ?? 0,
                 Penalties = x.ScoreBreakdownPenalties ?? 0
-            }
+            },
+        Recommendations = BuildRecommendations(x)
     };
+
+    private static List<LeadRecommendationDto> BuildRecommendations(Lead lead)
+    {
+        var list = new List<LeadRecommendationDto>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sd = lead.Sd ?? 0.0;
+        var status = lead.Status?.Trim() ?? string.Empty;
+        var penalties = lead.ScoreBreakdownPenalties ?? 0.0;
+
+        void Add(LeadRecommendationDto dto)
+        {
+            if (seen.Add(dto.Code)) list.Add(dto);
+        }
+
+        // 1) Primary next action from SD score band.
+        if (sd >= 85.0)
+        {
+            Add(new LeadRecommendationDto
+            {
+                Code = "urgent-call",
+                Title = "Appel urgent",
+                Description = "Lead très chaud: appeler immédiatement pour sécuriser l'engagement.",
+                ActionLabel = "Appeler maintenant",
+                Priority = "Critical"
+            });
+        }
+        else if (sd >= 70.0)
+        {
+            Add(new LeadRecommendationDto
+            {
+                Code = "call-soon",
+                Title = "Appeler bientôt",
+                Description = "Intention élevée: confirmer budget, décideur et prochain rendez-vous.",
+                ActionLabel = "Planifier un appel",
+                Priority = "High"
+            });
+        }
+        else if (sd >= 50.0)
+        {
+            Add(new LeadRecommendationDto
+            {
+                Code = "whatsapp-follow-up",
+                Title = "Message WhatsApp",
+                Description = "Relance courte et directe pour obtenir une réponse rapide.",
+                ActionLabel = "Envoyer un WhatsApp",
+                Priority = "Medium"
+            });
+        }
+        else
+        {
+            Add(new LeadRecommendationDto
+            {
+                Code = "nurturing-sequence",
+                Title = "Nurturing / Marketing",
+                Description = "Lead froid: basculer vers une séquence de contenu + relance planifiée.",
+                ActionLabel = "Lancer la séquence",
+                Priority = "Low"
+            });
+        }
+
+        // 2) Funnel stage recommendations (can stack with primary action).
+        if (status is LeadStatuses.Qualifie or LeadStatuses.Proposition or LeadStatuses.Negociation || lead.BonusQuoteRequested)
+        {
+            Add(new LeadRecommendationDto
+            {
+                Code = "send-quote",
+                Title = "Envoyer devis",
+                Description = "Signaux de maturité commerciale: formaliser une proposition rapidement.",
+                ActionLabel = "Préparer le devis",
+                Priority = "High"
+            });
+        }
+
+        if (status is LeadStatuses.Qualifie or LeadStatuses.Proposition)
+        {
+            Add(new LeadRecommendationDto
+            {
+                Code = "schedule-technical-visit",
+                Title = "Planifier visite technique",
+                Description = "Valider la faisabilité terrain pour accélérer la conversion.",
+                ActionLabel = "Planifier la visite",
+                Priority = "Medium"
+            });
+        }
+
+        if (status == LeadStatuses.Negociation)
+        {
+            Add(new LeadRecommendationDto
+            {
+                Code = "negotiation-push",
+                Title = "Relance négociation",
+                Description = "Traiter les objections prix/délais et proposer une option alternative claire.",
+                ActionLabel = "Relancer la négociation",
+                Priority = "High"
+            });
+        }
+
+        // 3) Bonus signal driven recommendations.
+        if (lead.BonusBudgetConfirmed)
+        {
+            Add(new LeadRecommendationDto
+            {
+                Code = "budget-validated",
+                Title = "Finaliser proposition budget",
+                Description = "Budget confirmé: proposer une configuration finale et un planning d'exécution.",
+                ActionLabel = "Finaliser la proposition",
+                Priority = "High"
+            });
+        }
+
+        if (lead.BonusFinancingInterest)
+        {
+            Add(new LeadRecommendationDto
+            {
+                Code = "financing-plan",
+                Title = "Proposer plan de financement",
+                Description = "Présenter une simulation de mensualités pour réduire les frictions de décision.",
+                ActionLabel = "Envoyer simulation",
+                Priority = "Medium"
+            });
+        }
+
+        // 4) Hygiene / operational recommendations.
+        if (lead.AssignedToUserId is null)
+        {
+            Add(new LeadRecommendationDto
+            {
+                Code = "assign-owner",
+                Title = "Assigner un commercial",
+                Description = "Aucun responsable assigné: affecter un owner pour garantir le suivi.",
+                ActionLabel = "Assigner maintenant",
+                Priority = "High"
+            });
+        }
+
+        if (penalties > 0.0)
+        {
+            Add(new LeadRecommendationDto
+            {
+                Code = "reactivation-plan",
+                Title = "Plan de réactivation",
+                Description = "Des pénalités sont appliquées: ajouter une action rapide pour relancer le lead.",
+                ActionLabel = "Relancer aujourd'hui",
+                Priority = "Medium"
+            });
+        }
+
+        Add(new LeadRecommendationDto
+        {
+            Code = "add-note",
+            Title = "Ajouter note commerciale",
+            Description = "Tracer le contexte, les objections et la prochaine action pour fiabiliser le suivi.",
+            ActionLabel = "Ajouter une note",
+            Priority = "Low"
+        });
+
+        var recalcAnchor = lead.ScoredAt ?? lead.UpdatedAt ?? lead.CreatedAt;
+        if (DateTimeOffset.UtcNow - recalcAnchor > TimeSpan.FromDays(3))
+        {
+            Add(new LeadRecommendationDto
+            {
+                Code = "recalculate-score",
+                Title = "Recalculer score",
+                Description = "Le score n'a pas été rafraîchi récemment.",
+                ActionLabel = "Recalculer",
+                Priority = "Low"
+            });
+        }
+
+        return list;
+    }
+
+    // ── Minimum score thresholds per status ───────────────────────────────────
+    // When the user manually selects a status, LVI and SD are bumped up to at
+    // least the minimum value that corresponds to that stage in the funnel.
+    private static readonly Dictionary<string, double> StatusMinScores = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [LeadStatuses.Nouveau]      = 0.0,
+        [LeadStatuses.Contacte]     = 10.0,
+        [LeadStatuses.Qualifie]     = 25.0,
+        [LeadStatuses.Proposition]  = 40.0,
+        [LeadStatuses.Negociation]  = 60.0,
+        [LeadStatuses.Installation] = 70.0,
+        [LeadStatuses.Gagne]        = 80.0,
+        [LeadStatuses.Perdu]        = 0.0,
+        [LeadStatuses.Archive]      = 0.0,
+    };
+
+    public async Task<LeadDto> ChangeStatusAsync(
+        Guid societyId,
+        Guid leadId,
+        Guid actorUserId,
+        ChangeLeadStatusRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.Status))
+            throw new AppException("VALIDATION_ERROR", "Status is required.", 400);
+
+        var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
+
+        var newStatus = request.Status.Trim();
+        var oldStatus = lead.Status;
+
+        lead.Status = newStatus;
+        lead.UpdatedAt = DateTimeOffset.UtcNow;
+
+        // Apply minimum score floor for the selected status
+        var minScore = StatusMinScores.TryGetValue(newStatus, out var ms) ? ms : 0.0;
+        var newLvi = Math.Max(lead.Lvi ?? 0.0, minScore);
+        var newSd  = Math.Max(lead.Sd  ?? 0.0, minScore);
+
+        // Derive temperature/priority from the new (possibly bumped) SD.
+        // Temperature and Priority have private setters — use ApplyScoring.
+        var effectiveSd = newSd;
+        var newTemp = effectiveSd >= 85 ? LeadTemperature.Hot
+                    : effectiveSd >= 70 ? LeadTemperature.High
+                    : effectiveSd >= 50 ? LeadTemperature.Medium
+                    : effectiveSd >= 20 ? LeadTemperature.Low
+                    : LeadTemperature.Cold;
+        var newPriority = effectiveSd >= 85 ? LeadPriority.Urgent
+                        : effectiveSd >= 60 ? LeadPriority.High
+                        : LeadPriority.Low;
+
+        var snapshot = new LeadScoreSnapshot
+        {
+            Lvi = newLvi,
+            Sd  = newSd,
+            Temperature = newTemp,
+            Priority    = newPriority,
+            Breakdown   = new LeadScoreBreakdown
+            {
+                Interaction  = lead.ScoreBreakdownInteraction  ?? 0,
+                Intention    = lead.ScoreBreakdownIntention    ?? 0,
+                Satisfaction = lead.ScoreBreakdownSatisfaction ?? 0,
+                Activity     = lead.ScoreBreakdownActivity     ?? 0,
+                Potential    = lead.ScoreBreakdownPotential    ?? 0,
+                Penalties    = lead.ScoreBreakdownPenalties    ?? 0,
+            }
+        };
+        lead.ApplyScoring(in snapshot);
+
+        _app.LeadActivities.Add(new LeadActivity
+        {
+            SocietyId = societyId,
+            LeadId = leadId,
+            Type = LeadActivityType.StatusChange,
+            Notes = $"{oldStatus} -> {newStatus} (score min: {minScore})",
+            CreatedByUserId = actorUserId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedById = actorUserId
+        });
+
+        await _app.SaveChangesAsync(cancellationToken);
+
+        return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
+    }
+
+    // ── Minimum score floors per temperature level ────────────────────────────
+    // When the user manually picks a temperature, LVI and SD are guaranteed
+    // to be at least this value.
+    private static readonly Dictionary<LeadTemperature, double> TempMinScores = new()
+    {
+        [LeadTemperature.Cold]   = 0.0,
+        [LeadTemperature.Low]    = 20.0,
+        [LeadTemperature.Medium] = 50.0,
+        [LeadTemperature.High]   = 70.0,
+        [LeadTemperature.Hot]    = 85.0,
+    };
+
+    public async Task<LeadDto> ChangeTemperatureAsync(
+        Guid societyId,
+        Guid leadId,
+        Guid actorUserId,
+        ChangeLeadTemperatureRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
+
+        var newTemp = request.Temperature;
+        var minScore = TempMinScores.TryGetValue(newTemp, out var ms) ? ms : 0.0;
+
+        var newLvi = Math.Max(lead.Lvi ?? 0.0, minScore);
+        var newSd  = Math.Max(lead.Sd  ?? 0.0, minScore);
+
+        // Priority is derived from the new SD value
+        var newPriority = newSd >= 85 ? LeadPriority.Urgent
+                        : newSd >= 60 ? LeadPriority.High
+                        : LeadPriority.Low;
+
+        // ApplyScoring is the only way to mutate Temperature and Priority
+        // (both have private setters on the domain entity).
+        var snapshot = new LeadScoreSnapshot
+        {
+            Lvi         = newLvi,
+            Sd          = newSd,
+            Temperature = newTemp,
+            Priority    = newPriority,
+            Breakdown   = new LeadScoreBreakdown
+            {
+                Interaction  = lead.ScoreBreakdownInteraction  ?? 0,
+                Intention    = lead.ScoreBreakdownIntention    ?? 0,
+                Satisfaction = lead.ScoreBreakdownSatisfaction ?? 0,
+                Activity     = lead.ScoreBreakdownActivity     ?? 0,
+                Potential    = lead.ScoreBreakdownPotential    ?? 0,
+                Penalties    = lead.ScoreBreakdownPenalties    ?? 0,
+            }
+        };
+        lead.ApplyScoring(in snapshot);
+
+        // Audit trail
+        lead.UpdatedAt  = DateTimeOffset.UtcNow;
+        lead.UpdatedById = actorUserId;
+
+        // Log the manual temperature override as an activity
+        _app.LeadActivities.Add(new LeadActivity
+        {
+            SocietyId        = societyId,
+            LeadId           = leadId,
+            Type             = LeadActivityType.StatusChange,
+            Notes            = $"Température changée manuellement -> {newTemp} (score min: {minScore}, LVI: {newLvi:F1}, SD: {newSd:F1})",
+            CreatedByUserId  = actorUserId,
+            CreatedAt        = DateTimeOffset.UtcNow,
+            CreatedById      = actorUserId
+        });
+
+        await _app.SaveChangesAsync(cancellationToken);
+
+        return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
+    }
+
+    public async Task<LeadDto> AddTagAsync(
+        Guid societyId,
+        Guid leadId,
+        AddLeadTagRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var tag = request.Tag?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(tag))
+            throw new AppException("VALIDATION_ERROR", "Tag cannot be empty.", 400);
+
+        if (tag.Length > 50)
+            throw new AppException("VALIDATION_ERROR", "Tag must be 50 characters or fewer.", 400);
+
+        var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
+
+        if (!lead.Tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+        {
+            lead.Tags = new List<string>(lead.Tags) { tag };
+            lead.UpdatedAt = DateTimeOffset.UtcNow;
+            await _app.SaveChangesAsync(cancellationToken);
+        }
+
+        return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
+    }
+
+    public async Task<LeadDto> RemoveTagAsync(
+        Guid societyId,
+        Guid leadId,
+        string tag,
+        CancellationToken cancellationToken = default)
+    {
+        var tagNorm = tag?.Trim().ToLowerInvariant() ?? string.Empty;
+
+        var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
+
+        lead.Tags = lead.Tags.Where(t => !t.Equals(tagNorm, StringComparison.OrdinalIgnoreCase)).ToList();
+        lead.UpdatedAt = DateTimeOffset.UtcNow;
+        await _app.SaveChangesAsync(cancellationToken);
+
+        return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
+    }
 
     private static IQueryable<Lead> ApplySortAsc(IQueryable<Lead> query, string? sortBy) =>
         sortBy?.ToLowerInvariant() switch
