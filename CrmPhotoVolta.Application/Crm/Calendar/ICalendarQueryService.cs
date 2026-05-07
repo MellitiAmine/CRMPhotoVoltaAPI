@@ -32,4 +32,5 @@ public sealed class CalendarEventDto
     public Guid? AssignedToUserId { get; init; }
     public List<Guid> Participants { get; init; } = new();
     public Guid? CreatedById { get; init; }
+    public Guid? LeadId { get; init; }
 }

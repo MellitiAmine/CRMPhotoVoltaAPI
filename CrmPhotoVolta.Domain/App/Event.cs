@@ -12,6 +12,11 @@ public class CalendarEvent : SocietyScopedEntity
 
     public string? Description { get; set; }
 
+    /// <summary>Optional CRM lead this event was created for (pipeline deal id).</summary>
+    public Guid? LeadId { get; set; }
+
+    public Lead? Lead { get; set; }
+
     /// <summary>Primary assignee (kept for backward compatibility with technician/project filters).</summary>
     public Guid? AssignedToUserId { get; set; }
 

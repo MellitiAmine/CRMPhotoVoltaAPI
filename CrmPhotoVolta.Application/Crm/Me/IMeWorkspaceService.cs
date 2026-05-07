@@ -35,4 +35,7 @@ public sealed class MyScheduleEntryDto
     public string Type { get; init; } = string.Empty;
     public DateTimeOffset StartDate { get; init; }
     public DateTimeOffset EndDate { get; init; }
+
+    /// <summary>Optional CRM lead / pipeline deal linked to this event.</summary>
+    public Guid? LeadId { get; init; }
 }

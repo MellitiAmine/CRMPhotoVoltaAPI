@@ -158,6 +158,7 @@ public sealed class AppDbContext : DbContext
         {
             b.ToTable("Events");
             b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Events_SocietyId");
+            b.HasIndex(x => x.LeadId).HasDatabaseName("IX_Events_LeadId");
             b.Property(x => x.Title).HasMaxLength(300);
             b.Property(x => x.Type).HasMaxLength(40);
             b.Property(x => x.Description).HasMaxLength(2000);
@@ -165,6 +166,7 @@ public sealed class AppDbContext : DbContext
              .HasConversion(participantsConverter)
              .HasColumnType("text")
              .HasDefaultValueSql("'[]'");
+            b.HasOne(x => x.Lead).WithMany().HasForeignKey(x => x.LeadId).OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<Quote>(b =>

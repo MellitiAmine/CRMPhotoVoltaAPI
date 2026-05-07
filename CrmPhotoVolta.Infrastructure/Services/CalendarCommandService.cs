@@ -48,6 +48,14 @@ public sealed class CalendarCommandService : ICalendarCommandService
                 throw new AppException("INVALID_PARTICIPANT", "One or more participants do not belong to this society.", 400);
         }
 
+        if (request.LeadId is { } leadId)
+        {
+            var leadOk = await _app.Leads.AsNoTracking()
+                .AnyAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken);
+            if (!leadOk)
+                throw new AppException("INVALID_LEAD", "Lead not found in this society.", 400);
+        }
+
         var ev = new CalendarEvent
         {
             SocietyId = societyId,
@@ -56,6 +64,7 @@ public sealed class CalendarCommandService : ICalendarCommandService
             StartDate = request.StartDate,
             EndDate = request.EndDate,
             Description = request.Description?.Trim(),
+            LeadId = request.LeadId,
             Participants = request.Participants.Distinct().ToList(),
             AssignedToUserId = request.Participants.Count > 0 ? request.Participants[0] : null,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -75,7 +84,8 @@ public sealed class CalendarCommandService : ICalendarCommandService
             Description = ev.Description,
             AssignedToUserId = ev.AssignedToUserId,
             Participants = ev.Participants,
-            CreatedById = ev.CreatedById
+            CreatedById = ev.CreatedById,
+            LeadId = ev.LeadId
         };
     }
 

@@ -61,7 +61,8 @@ public sealed class CalendarQueryService : ICalendarQueryService
                     x.Description,
                     x.AssignedToUserId,
                     x.Participants,
-                    x.CreatedById
+                    x.CreatedById,
+                    x.LeadId
                 })
                 .ToListAsync(cancellationToken);
 
@@ -77,7 +78,8 @@ public sealed class CalendarQueryService : ICalendarQueryService
                     Description = x.Description,
                     AssignedToUserId = x.AssignedToUserId,
                     Participants = x.Participants,
-                    CreatedById = x.CreatedById
+                    CreatedById = x.CreatedById,
+                    LeadId = x.LeadId
                 })
                 .ToList();
         }
@@ -94,7 +96,8 @@ public sealed class CalendarQueryService : ICalendarQueryService
                 Description = x.Description,
                 AssignedToUserId = x.AssignedToUserId,
                 Participants = x.Participants,
-                CreatedById = x.CreatedById
+                CreatedById = x.CreatedById,
+                LeadId = x.LeadId
             })
             .ToListAsync(cancellationToken);
     }

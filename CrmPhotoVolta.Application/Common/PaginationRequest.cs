@@ -17,7 +17,7 @@ public sealed class PaginationRequest
         set
         {
             if (value < 10) _pageSize = 10;
-            else if (value > 50) _pageSize = 50;
+            else if (value > 100) _pageSize = 100;
             else _pageSize = value;
         }
     }

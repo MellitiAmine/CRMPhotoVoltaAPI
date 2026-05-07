@@ -38,11 +38,23 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<DateTimeOffset>("EndDate")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
+
+                    b.Property<Guid?>("LeadId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Participants")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasDefaultValueSql("'[]'");
 
                     b.Property<Guid>("SocietyId")
                         .HasColumnType("uuid");
@@ -65,6 +77,9 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("LeadId")
+                        .HasDatabaseName("IX_Events_LeadId");
 
                     b.HasIndex("SocietyId")
                         .HasDatabaseName("IX_Events_SocietyId");
@@ -1066,6 +1081,16 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                         .HasDatabaseName("IX_WhatsAppRecommendations_SocietyId");
 
                     b.ToTable("WhatsAppRecommendations", "app");
+                });
+
+            modelBuilder.Entity("CrmPhotoVolta.Domain.App.CalendarEvent", b =>
+                {
+                    b.HasOne("CrmPhotoVolta.Domain.App.Lead", "Lead")
+                        .WithMany()
+                        .HasForeignKey("LeadId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Lead");
                 });
 
             modelBuilder.Entity("CrmPhotoVolta.Domain.App.CrmTask", b =>

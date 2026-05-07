@@ -19,4 +19,7 @@ public sealed class CreateCalendarEventRequest
 
     /// <summary>User IDs to invite (must be in the same society).</summary>
     public List<Guid> Participants { get; init; } = new();
+
+    /// <summary>Optional lead (pipeline deal) this event is tied to.</summary>
+    public Guid? LeadId { get; init; }
 }
