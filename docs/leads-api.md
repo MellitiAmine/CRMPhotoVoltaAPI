@@ -34,6 +34,7 @@ The frontend should leverage the priorities (`Urgent`, `High`, `Low`) and temper
      "assignedToUserId": "uuid-here", // optional
      "monthlyBillEur": 1500, // optional
      "estimatedKw": 10, // optional
+     "montantEstimé": 5000, // optional
      "averageRating": 0, // optional
      "bonusQuoteRequested": false, // optional boolean
      "bonusBudgetConfirmed": false, // optional boolean

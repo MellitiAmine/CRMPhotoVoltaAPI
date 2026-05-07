@@ -14,6 +14,7 @@ public class Lead : SocietyScopedEntity
 
     public double? MonthlyBillEur { get; set; }
     public double? EstimatedKw { get; set; }
+    public double? MontantEstimé { get; set; }
 
     public bool BonusQuoteRequested { get; set; }
     public bool BonusBudgetConfirmed { get; set; }
@@ -33,6 +34,9 @@ public class Lead : SocietyScopedEntity
     public double? ScoreBreakdownActivity { get; set; }
     public double? ScoreBreakdownPotential { get; set; }
     public double? ScoreBreakdownPenalties { get; set; }
+
+    /// <summary>Manual tags added by commercial/admin users (stored as JSON array).</summary>
+    public List<string> Tags { get; set; } = new();
 
     public ICollection<LeadActivity> Activities { get; set; } = new List<LeadActivity>();
     public ICollection<Deal> Deals { get; set; } = new List<Deal>();

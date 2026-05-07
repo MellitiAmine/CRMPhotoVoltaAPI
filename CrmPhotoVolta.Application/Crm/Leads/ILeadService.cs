@@ -24,6 +24,21 @@ public interface ILeadService
     Task<LeadActivityDto> AddNoteAsync(Guid societyId, Guid leadId, Guid actorUserId, AddLeadNoteRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<LeadTimelineEntryDto>> GetTimelineAsync(Guid societyId, Guid leadId, CancellationToken cancellationToken = default);
 
-    /// <summary>Recalcule LVI/SD à partir des champs lead + activités (même logique qu’après mise à jour).</summary>
+    /// <summary>Recalcule LVI/SD a partir des champs lead + activites (meme logique qu apres mise a jour).</summary>
     Task<LeadDto> RecalculateScoreAsync(Guid societyId, Guid leadId, CancellationToken cancellationToken = default);
+
+    /// <summary>Change le statut manuellement et applique le score minimum associe au statut.</summary>
+    Task<LeadDto> ChangeStatusAsync(Guid societyId, Guid leadId, Guid actorUserId, ChangeLeadStatusRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Change la temperature manuellement (Hot/High/Medium/Low/Cold).
+    /// Applique le score minimum correspondant et trace UpdatedById / UpdatedAt.
+    /// </summary>
+    Task<LeadDto> ChangeTemperatureAsync(Guid societyId, Guid leadId, Guid actorUserId, ChangeLeadTemperatureRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>Ajoute un tag manuel au lead.</summary>
+    Task<LeadDto> AddTagAsync(Guid societyId, Guid leadId, AddLeadTagRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>Supprime un tag manuel du lead.</summary>
+    Task<LeadDto> RemoveTagAsync(Guid societyId, Guid leadId, string tag, CancellationToken cancellationToken = default);
 }

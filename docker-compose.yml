@@ -4,7 +4,9 @@
 
 services:
   db:
-    image: postgres:16-alpine
+    # Bookworm avoids a known failure mode where a broken local cache can leave Postgres's
+    # docker-entrypoint.sh at 0 bytes (then: "exec format error"). Prefer this over alpine here.
+    image: postgres:16-bookworm
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

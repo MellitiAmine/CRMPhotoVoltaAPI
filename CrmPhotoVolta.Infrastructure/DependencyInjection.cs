@@ -101,6 +101,7 @@ public static class DependencyInjection
         services.AddScoped<IInstallationWorkflowService, InstallationWorkflowService>();
         services.AddScoped<IMeWorkspaceService, MeWorkspaceService>();
         services.AddScoped<ICalendarQueryService, CalendarQueryService>();
+        services.AddScoped<ICalendarCommandService, CalendarCommandService>();
         services.AddScoped<INotificationService, CrmNotificationService>();
         services.AddScoped<ILeadScoringNotificationSink, LeadScoringNotificationSink>();
         services.AddScoped<ILeadSdAutomationService, LeadSdAutomationService>();

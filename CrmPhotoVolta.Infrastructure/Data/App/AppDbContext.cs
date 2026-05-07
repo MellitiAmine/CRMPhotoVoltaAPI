@@ -1,6 +1,8 @@
+using System.Text.Json;
 using CrmPhotoVolta.Application.Abstractions;
 using CrmPhotoVolta.Domain.App;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace CrmPhotoVolta.Infrastructure.Data.App;
 
@@ -38,6 +40,11 @@ public sealed class AppDbContext : DbContext
     {
         modelBuilder.HasDefaultSchema("app");
 
+        var tagsConverter = new ValueConverter<List<string>, string>(
+            v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+            v => JsonSerializer.Deserialize<List<string>>(v, (JsonSerializerOptions?)null) ?? new List<string>()
+        );
+
         modelBuilder.Entity<Lead>(b =>
         {
             b.ToTable("Leads");
@@ -46,6 +53,10 @@ public sealed class AppDbContext : DbContext
             b.Property(x => x.Name).HasMaxLength(200);
             b.Property(x => x.Temperature).HasConversion<int>();
             b.Property(x => x.Priority).HasConversion<int>();
+            b.Property(x => x.Tags)
+             .HasConversion(tagsConverter)
+             .HasColumnType("text")
+             .HasDefaultValueSql("'[]'");
         });
 
         modelBuilder.Entity<LeadActivity>(b =>
@@ -138,10 +149,22 @@ public sealed class AppDbContext : DbContext
             b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Documents_SocietyId");
         });
 
+        var participantsConverter = new ValueConverter<List<Guid>, string>(
+            v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+            v => JsonSerializer.Deserialize<List<Guid>>(v, (JsonSerializerOptions?)null) ?? new List<Guid>()
+        );
+
         modelBuilder.Entity<CalendarEvent>(b =>
         {
             b.ToTable("Events");
             b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Events_SocietyId");
+            b.Property(x => x.Title).HasMaxLength(300);
+            b.Property(x => x.Type).HasMaxLength(40);
+            b.Property(x => x.Description).HasMaxLength(2000);
+            b.Property(x => x.Participants)
+             .HasConversion(participantsConverter)
+             .HasColumnType("text")
+             .HasDefaultValueSql("'[]'");
         });
 
         modelBuilder.Entity<Quote>(b =>

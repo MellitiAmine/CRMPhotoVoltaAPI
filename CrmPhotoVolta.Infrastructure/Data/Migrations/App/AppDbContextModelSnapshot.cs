@@ -506,6 +506,11 @@ namespace CrmPhotoVolta.Infrastructure.Data.Migrations.App
                     b.Property<int>("Priority")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Tags")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasDefaultValueSql("'[]'");
+
                     b.HasKey("Id");
 
                     b.HasIndex("SocietyId")
