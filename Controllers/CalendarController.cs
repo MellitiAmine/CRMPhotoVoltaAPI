@@ -40,12 +40,13 @@ public sealed class CalendarController : TenantCrmControllerBase
         [FromQuery] DateTimeOffset? to,
         [FromQuery] Guid? technicianId,
         [FromQuery] Guid? projectId,
+        [FromQuery] Guid? leadId,
         CancellationToken cancellationToken)
     {
         var societyId = RequireSociety();
         var (userId, isAdmin) = await GetCallerInfoAsync(societyId, cancellationToken);
 
-        var list = await _query.ListAsync(societyId, from, to, technicianId, projectId, userId, isAdmin, cancellationToken);
+        var list = await _query.ListAsync(societyId, from, to, technicianId, projectId, leadId, userId, isAdmin, cancellationToken);
         return Ok(ApiResponse.Ok(list));
     }
 
@@ -56,7 +57,7 @@ public sealed class CalendarController : TenantCrmControllerBase
         var societyId = RequireSociety();
         var (userId, isAdmin) = await GetCallerInfoAsync(societyId, cancellationToken);
 
-        var list = await _query.ListAsync(societyId, from, to, id, null, userId, isAdmin, cancellationToken);
+        var list = await _query.ListAsync(societyId, from, to, id, null, null, userId, isAdmin, cancellationToken);
         return Ok(ApiResponse.Ok(list));
     }
 
@@ -67,7 +68,17 @@ public sealed class CalendarController : TenantCrmControllerBase
         var societyId = RequireSociety();
         var (userId, isAdmin) = await GetCallerInfoAsync(societyId, cancellationToken);
 
-        var list = await _query.ListAsync(societyId, from, to, null, id, userId, isAdmin, cancellationToken);
+        var list = await _query.ListAsync(societyId, from, to, null, id, null, userId, isAdmin, cancellationToken);
+        return Ok(ApiResponse.Ok(list));
+    }
+
+    /// <summary>Tenant roster for calendar invites — not restricted to the commercial subtree.</summary>
+    [HttpGet("participant-candidates")]
+    [Authorize(Policy = SocietyPolicies.Commercial)]
+    public async Task<IActionResult> ParticipantCandidates(CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var list = await _query.ListParticipantCandidatesAsync(societyId, cancellationToken);
         return Ok(ApiResponse.Ok(list));
     }
 
@@ -83,6 +94,18 @@ public sealed class CalendarController : TenantCrmControllerBase
 
         var created = await _command.CreateAsync(societyId, creatorId, request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(created));
+    }
+
+    // ── PUT /api/v1/calendar/{id} ──────────────────────────────────────────────
+    [HttpPut("{id:guid}")]
+    [Authorize(Policy = SocietyPolicies.Commercial)]
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateCalendarEventRequest request, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var userId = _currentUser.UserId
+            ?? throw new AppException("UNAUTHORIZED", "Authenticated user identity could not be resolved.", 401);
+        var updated = await _command.UpdateAsync(societyId, id, userId, request, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
     }
 
     // ── DELETE /api/v1/calendar/{id} ──────────────────────────────────────────

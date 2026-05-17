@@ -22,10 +22,16 @@ public sealed class DealService : IDealService
 
     public async Task<(IReadOnlyList<DealListItemDto> Items, PaginationMeta Meta)> ListPagedAsync(
         Guid societyId,
+        Guid actorUserId,
         PaginationRequest pagination,
         CancellationToken cancellationToken = default)
     {
-        var query = _app.Deals.AsNoTracking().Where(x => x.SocietyId == societyId);
+        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, cancellationToken);
+        var query = _app.Deals.AsNoTracking()
+            .Where(x => x.SocietyId == societyId)
+            .Where(x =>
+                (x.CreatedById.HasValue && relatedUserIds.Contains(x.CreatedById.Value))
+                || (x.AssignedToUserId.HasValue && relatedUserIds.Contains(x.AssignedToUserId.Value)));
 
         if (!string.IsNullOrWhiteSpace(pagination.Search))
         {
@@ -57,18 +63,21 @@ public sealed class DealService : IDealService
         return (items, pagination.ToMeta(total));
     }
 
-    public async Task<DealDto> GetAsync(Guid societyId, Guid dealId, CancellationToken cancellationToken = default)
+    public async Task<DealDto> GetAsync(Guid societyId, Guid actorUserId, Guid dealId, CancellationToken cancellationToken = default)
     {
+        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, cancellationToken);
         var row = await _app.Deals
             .AsNoTracking()
             .Include(x => x.Lead)
-            .FirstOrDefaultAsync(x => x.Id == dealId && x.SocietyId == societyId, cancellationToken)
+            .FirstOrDefaultAsync(x => x.Id == dealId && x.SocietyId == societyId
+                && ((x.CreatedById.HasValue && relatedUserIds.Contains(x.CreatedById.Value))
+                    || (x.AssignedToUserId.HasValue && relatedUserIds.Contains(x.AssignedToUserId.Value))), cancellationToken)
             ?? throw new AppException("DEAL_NOT_FOUND", "Deal not found.", 404);
 
         return Map(row);
     }
 
-    public async Task<DealDto> CreateAsync(Guid societyId, CreateDealRequest request, CancellationToken cancellationToken = default)
+    public async Task<DealDto> CreateAsync(Guid societyId, Guid actorUserId, CreateDealRequest request, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Title))
             throw new AppException("VALIDATION_ERROR", "Title is required.", 400);
@@ -87,16 +96,17 @@ public sealed class DealService : IDealService
             Value = request.Value,
             Stage = string.IsNullOrWhiteSpace(request.Stage) ? DealStages.New : request.Stage.Trim(),
             AssignedToUserId = request.AssignedToUserId,
-            CreatedAt = DateTimeOffset.UtcNow
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedById = actorUserId
         };
 
         _app.Deals.Add(deal);
         await _app.SaveChangesAsync(cancellationToken);
 
-        return Map(await LoadDealWithLeadAsync(societyId, deal.Id, cancellationToken));
+        return Map(await LoadDealWithLeadAsync(societyId, actorUserId, deal.Id, cancellationToken));
     }
 
-    public async Task<DealDto> UpdateAsync(Guid societyId, Guid dealId, UpdateDealRequest request, CancellationToken cancellationToken = default)
+    public async Task<DealDto> UpdateAsync(Guid societyId, Guid actorUserId, Guid dealId, UpdateDealRequest request, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Title))
             throw new AppException("VALIDATION_ERROR", "Title is required.", 400);
@@ -107,7 +117,10 @@ public sealed class DealService : IDealService
         if (request.AssignedToUserId is { } assignee)
             await EnsureUserInSocietyAsync(societyId, assignee, cancellationToken);
 
-        var deal = await _app.Deals.FirstOrDefaultAsync(x => x.Id == dealId && x.SocietyId == societyId, cancellationToken)
+        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, cancellationToken);
+        var deal = await _app.Deals.FirstOrDefaultAsync(x => x.Id == dealId && x.SocietyId == societyId
+                && ((x.CreatedById.HasValue && relatedUserIds.Contains(x.CreatedById.Value))
+                    || (x.AssignedToUserId.HasValue && relatedUserIds.Contains(x.AssignedToUserId.Value))), cancellationToken)
             ?? throw new AppException("DEAL_NOT_FOUND", "Deal not found.", 404);
 
         deal.LeadId = request.LeadId;
@@ -119,12 +132,15 @@ public sealed class DealService : IDealService
 
         await _app.SaveChangesAsync(cancellationToken);
 
-        return Map(await LoadDealWithLeadAsync(societyId, dealId, cancellationToken));
+        return Map(await LoadDealWithLeadAsync(societyId, actorUserId, dealId, cancellationToken));
     }
 
-    public async Task DeleteAsync(Guid societyId, Guid dealId, CancellationToken cancellationToken = default)
+    public async Task DeleteAsync(Guid societyId, Guid actorUserId, Guid dealId, CancellationToken cancellationToken = default)
     {
-        var deal = await _app.Deals.FirstOrDefaultAsync(x => x.Id == dealId && x.SocietyId == societyId, cancellationToken)
+        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, cancellationToken);
+        var deal = await _app.Deals.FirstOrDefaultAsync(x => x.Id == dealId && x.SocietyId == societyId
+                && ((x.CreatedById.HasValue && relatedUserIds.Contains(x.CreatedById.Value))
+                    || (x.AssignedToUserId.HasValue && relatedUserIds.Contains(x.AssignedToUserId.Value))), cancellationToken)
             ?? throw new AppException("DEAL_NOT_FOUND", "Deal not found.", 404);
 
         var hasProjects = await _app.Projects.AnyAsync(x => x.DealId == dealId && x.SocietyId == societyId, cancellationToken);
@@ -188,12 +204,54 @@ public sealed class DealService : IDealService
             }
     };
 
-    private async Task<Deal> LoadDealWithLeadAsync(Guid societyId, Guid dealId, CancellationToken cancellationToken)
+    private async Task<Deal> LoadDealWithLeadAsync(Guid societyId, Guid actorUserId, Guid dealId, CancellationToken cancellationToken)
     {
+        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, cancellationToken);
         return await _app.Deals
             .AsNoTracking()
             .Include(x => x.Lead)
-            .FirstAsync(x => x.Id == dealId && x.SocietyId == societyId, cancellationToken);
+            .FirstAsync(x => x.Id == dealId && x.SocietyId == societyId
+                && ((x.CreatedById.HasValue && relatedUserIds.Contains(x.CreatedById.Value))
+                    || (x.AssignedToUserId.HasValue && relatedUserIds.Contains(x.AssignedToUserId.Value))), cancellationToken);
+    }
+
+    private async Task<HashSet<Guid>> GetRelatedUserIdsAsync(Guid societyId, Guid actorUserId, CancellationToken cancellationToken)
+    {
+        var members = await _core.UserSocieties
+            .Where(x => x.SocietyId == societyId && !x.IsDeleted)
+            .Select(x => x.UserId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var memberSet = members.ToHashSet();
+
+        var related = new HashSet<Guid> { actorUserId };
+        if (!memberSet.Contains(actorUserId))
+            return related;
+
+        var actorCreatorId = await _core.Users
+            .Where(u => u.Id == actorUserId && !u.IsDeleted)
+            .Select(u => u.CreatedById)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (actorCreatorId.HasValue && memberSet.Contains(actorCreatorId.Value))
+            related.Add(actorCreatorId.Value);
+
+        var creatorCandidates = new List<Guid> { actorUserId };
+        if (actorCreatorId.HasValue)
+            creatorCandidates.Add(actorCreatorId.Value);
+
+        var subordinateIds = await _core.Users
+            .Where(u => !u.IsDeleted && u.CreatedById.HasValue && creatorCandidates.Contains(u.CreatedById.Value))
+            .Select(u => u.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var uid in subordinateIds)
+        {
+            if (memberSet.Contains(uid))
+                related.Add(uid);
+        }
+
+        return related;
     }
 
     private static IQueryable<Deal> ApplySortAsc(IQueryable<Deal> query, string? sortBy) =>

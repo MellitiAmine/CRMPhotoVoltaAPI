@@ -4,6 +4,7 @@ using CrmPhotoVolta.Application.Exceptions;
 using CrmPhotoVolta.Application.Automation;
 using CrmPhotoVolta.Application.Scoring;
 using CrmPhotoVolta.Domain.App;
+using CrmPhotoVolta.Domain.Core;
 using CrmPhotoVolta.Infrastructure.Data.App;
 using CrmPhotoVolta.Infrastructure.Data.Core;
 using Microsoft.EntityFrameworkCore;
@@ -16,25 +17,37 @@ public sealed class LeadService : ILeadService
     private readonly CoreDbContext _core;
     private readonly ILeadScoringService _scoring;
     private readonly ILeadSdAutomationService _sdAutomation;
+    private readonly ILeadJournalService _journal;
 
     public LeadService(
         AppDbContext app,
         CoreDbContext core,
         ILeadScoringService scoring,
-        ILeadSdAutomationService sdAutomation)
+        ILeadSdAutomationService sdAutomation,
+        ILeadJournalService journal)
     {
         _app = app;
         _core = core;
         _scoring = scoring;
         _sdAutomation = sdAutomation;
+        _journal = journal;
     }
+
+    private static bool IsLegacyAuditActivityType(LeadActivityType t) =>
+        t is LeadActivityType.Assignment or LeadActivityType.StatusChange or LeadActivityType.Converted;
 
     public async Task<(IReadOnlyList<LeadListItemDto> Items, PaginationMeta Meta)> ListPagedAsync(
         Guid societyId,
+        Guid actorUserId,
         PaginationRequest pagination,
         CancellationToken cancellationToken = default)
     {
-        var query = _app.Leads.AsNoTracking().Where(x => x.SocietyId == societyId);
+        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, cancellationToken);
+        var query = _app.Leads.AsNoTracking()
+            .Where(x => x.SocietyId == societyId)
+            .Where(x =>
+                (x.CreatedById.HasValue && relatedUserIds.Contains(x.CreatedById.Value))
+                || (x.AssignedToUserId.HasValue && relatedUserIds.Contains(x.AssignedToUserId.Value)));
 
         if (!string.IsNullOrWhiteSpace(pagination.Search))
         {
@@ -79,14 +92,17 @@ public sealed class LeadService : ILeadService
         return (items, pagination.ToMeta(total));
     }
 
-    public async Task<LeadDto> GetAsync(Guid societyId, Guid leadId, CancellationToken cancellationToken = default)
+    public async Task<LeadDto> GetAsync(Guid societyId, Guid actorUserId, Guid leadId, CancellationToken cancellationToken = default)
     {
+        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, cancellationToken);
         var row = await _app.Leads.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
+            .FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId
+                && ((x.CreatedById.HasValue && relatedUserIds.Contains(x.CreatedById.Value))
+                    || (x.AssignedToUserId.HasValue && relatedUserIds.Contains(x.AssignedToUserId.Value))), cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
         if (row.ScoredAt is null)
-            return await RecalculateScoreAsync(societyId, leadId, cancellationToken);
+            return await RecalculateScoreAsync(societyId, actorUserId, leadId, cancellationToken);
 
         return Map(row);
     }
@@ -128,7 +144,7 @@ public sealed class LeadService : ILeadService
         return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == lead.Id, cancellationToken));
     }
 
-    public async Task<LeadDto> UpdateAsync(Guid societyId, Guid leadId, UpdateLeadRequest request, CancellationToken cancellationToken = default)
+    public async Task<LeadDto> UpdateAsync(Guid societyId, Guid actorUserId, Guid leadId, UpdateLeadRequest request, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Name))
             throw new AppException("VALIDATION_ERROR", "Name is required.", 400);
@@ -136,8 +152,14 @@ public sealed class LeadService : ILeadService
         if (request.AssignedToUserId is { } assignee)
             await EnsureUserInSocietyAsync(societyId, assignee, cancellationToken);
 
-        var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
+        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, cancellationToken);
+        var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId
+                && ((x.CreatedById.HasValue && relatedUserIds.Contains(x.CreatedById.Value))
+                    || (x.AssignedToUserId.HasValue && relatedUserIds.Contains(x.AssignedToUserId.Value))), cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
+
+        var prevStatus = lead.Status;
+        var prevAssign = lead.AssignedToUserId;
 
         lead.Name = request.Name.Trim();
         lead.Phone = request.Phone?.Trim();
@@ -155,6 +177,30 @@ public sealed class LeadService : ILeadService
         if (request.BonusFinancingInterest is { } bf) lead.BonusFinancingInterest = bf;
         lead.UpdatedAt = DateTimeOffset.UtcNow;
 
+        if (prevAssign != lead.AssignedToUserId)
+        {
+            _journal.Stage(
+                societyId,
+                leadId,
+                actorUserId,
+                LeadJournalActions.CommercialAssigned,
+                "commercial_user",
+                lead.AssignedToUserId,
+                new { beforeUserId = prevAssign, afterUserId = lead.AssignedToUserId });
+        }
+
+        if (!string.Equals(prevStatus, lead.Status, StringComparison.Ordinal))
+        {
+            _journal.Stage(
+                societyId,
+                leadId,
+                actorUserId,
+                LeadJournalActions.LeadStatusChanged,
+                "lead",
+                leadId,
+                new { before = prevStatus, after = lead.Status });
+        }
+
         await _app.SaveChangesAsync(cancellationToken);
 
         await ApplyScoreAsync(leadId, societyId, cancellationToken);
@@ -162,9 +208,12 @@ public sealed class LeadService : ILeadService
         return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
     }
 
-    public async Task DeleteAsync(Guid societyId, Guid leadId, CancellationToken cancellationToken = default)
+    public async Task DeleteAsync(Guid societyId, Guid actorUserId, Guid leadId, CancellationToken cancellationToken = default)
     {
-        var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
+        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, cancellationToken);
+        var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId
+                && ((x.CreatedById.HasValue && relatedUserIds.Contains(x.CreatedById.Value))
+                    || (x.AssignedToUserId.HasValue && relatedUserIds.Contains(x.AssignedToUserId.Value))), cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
         var hasDeals = await _app.Deals.AnyAsync(x => x.LeadId == leadId && x.SocietyId == societyId, cancellationToken);
@@ -176,12 +225,16 @@ public sealed class LeadService : ILeadService
         await _app.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyList<LeadActivityDto>> ListActivitiesAsync(Guid societyId, Guid leadId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<LeadActivityDto>> ListActivitiesAsync(Guid societyId, Guid actorUserId, Guid leadId, CancellationToken cancellationToken = default)
     {
-        await EnsureLeadAsync(societyId, leadId, cancellationToken);
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
 
         return await _app.LeadActivities.AsNoTracking()
             .Where(x => x.LeadId == leadId && x.SocietyId == societyId)
+            .Where(x =>
+                x.Type != LeadActivityType.Assignment
+                && x.Type != LeadActivityType.StatusChange
+                && x.Type != LeadActivityType.Converted)
             .OrderByDescending(x => x.CreatedAt)
             .Select(x => new LeadActivityDto
             {
@@ -209,7 +262,15 @@ public sealed class LeadService : ILeadService
         if (request.Rating is { } rr && (rr < 1 || rr > 5))
             throw new AppException("VALIDATION_ERROR", "Rating must be between 1 and 5.", 400);
 
-        await EnsureLeadAsync(societyId, leadId, cancellationToken);
+        if (IsLegacyAuditActivityType(request.Type) || request.Type == LeadActivityType.MeetingScheduled)
+        {
+            throw new AppException(
+                "INVALID_ACTIVITY_TYPE",
+                "This activity type is reserved for the audit journal or the calendar. Log calls/notes from the activity form, and schedule meetings from the calendar.",
+                400);
+        }
+
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
 
         var activity = new LeadActivity
         {
@@ -224,21 +285,101 @@ public sealed class LeadService : ILeadService
         };
 
         _app.LeadActivities.Add(activity);
+
         await _app.SaveChangesAsync(cancellationToken);
 
         await ApplyScoreAsync(leadId, societyId, cancellationToken);
 
         var row = await _app.LeadActivities.AsNoTracking().FirstAsync(x => x.Id == activity.Id, cancellationToken);
-        return new LeadActivityDto
+        return MapActivity(row);
+    }
+
+    public async Task<LeadActivityDto> UpdateActivityAsync(
+        Guid societyId,
+        Guid leadId,
+        Guid activityId,
+        Guid actorUserId,
+        UpdateLeadActivityRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if ((int)request.Type == 0)
+            throw new AppException("VALIDATION_ERROR", "Activity type is required.", 400);
+
+        if (request.Rating is { } rr && (rr < 1 || rr > 5))
+            throw new AppException("VALIDATION_ERROR", "Rating must be between 1 and 5.", 400);
+
+        if (IsLegacyAuditActivityType(request.Type) || request.Type == LeadActivityType.MeetingScheduled)
         {
-            Id = row.Id,
-            LeadId = row.LeadId,
-            Type = row.Type,
-            Notes = row.Notes,
-            Rating = row.Rating,
-            CreatedByUserId = row.CreatedByUserId,
-            CreatedAt = row.CreatedAt
-        };
+            throw new AppException(
+                "INVALID_ACTIVITY_TYPE",
+                "This activity type is reserved for the audit journal or the calendar.",
+                400);
+        }
+
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
+
+        var activity = await _app.LeadActivities
+            .FirstOrDefaultAsync(x => x.Id == activityId && x.LeadId == leadId && x.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("ACTIVITY_NOT_FOUND", "Activity not found.", 404);
+
+        var beforeType = activity.Type;
+        var beforeNotes = activity.Notes;
+        var beforeRating = activity.Rating;
+
+        activity.Type = request.Type;
+        activity.Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
+        activity.Rating = request.Rating is null or 0 ? null : request.Rating;
+        activity.UpdatedAt = DateTimeOffset.UtcNow;
+        activity.UpdatedById = actorUserId;
+
+        _journal.Stage(
+            societyId,
+            leadId,
+            actorUserId,
+            LeadJournalActions.ActivityUpdated,
+            "lead_activity",
+            activity.Id,
+            new
+            {
+                before = new { type = beforeType.ToString(), notes = beforeNotes, rating = beforeRating },
+                after = new { type = activity.Type.ToString(), notes = activity.Notes, rating = activity.Rating }
+            });
+
+        await _app.SaveChangesAsync(cancellationToken);
+        await ApplyScoreAsync(leadId, societyId, cancellationToken);
+
+        var row = await _app.LeadActivities.AsNoTracking().FirstAsync(x => x.Id == activity.Id, cancellationToken);
+        return MapActivity(row);
+    }
+
+    public async Task DeleteActivityAsync(
+        Guid societyId,
+        Guid leadId,
+        Guid activityId,
+        Guid actorUserId,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
+
+        var activity = await _app.LeadActivities
+            .FirstOrDefaultAsync(x => x.Id == activityId && x.LeadId == leadId && x.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("ACTIVITY_NOT_FOUND", "Activity not found.", 404);
+
+        _journal.Stage(
+            societyId,
+            leadId,
+            actorUserId,
+            LeadJournalActions.ActivityDeleted,
+            "lead_activity",
+            activity.Id,
+            new { type = activity.Type.ToString(), notes = activity.Notes, rating = activity.Rating });
+
+        activity.IsDeleted = true;
+        activity.UpdatedAt = DateTimeOffset.UtcNow;
+        activity.UpdatedById = actorUserId;
+
+        await _app.SaveChangesAsync(cancellationToken);
+        await ApplyScoreAsync(leadId, societyId, cancellationToken);
     }
 
     public async Task<LeadDto> AssignAsync(
@@ -249,23 +390,24 @@ public sealed class LeadService : ILeadService
         CancellationToken cancellationToken = default)
     {
         await EnsureUserInSocietyAsync(societyId, request.UserId, cancellationToken);
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
 
         var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
+        var prevAssign = lead.AssignedToUserId;
+
         lead.AssignedToUserId = request.UserId;
         lead.UpdatedAt = DateTimeOffset.UtcNow;
 
-        _app.LeadActivities.Add(new LeadActivity
-        {
-            SocietyId = societyId,
-            LeadId = leadId,
-            Type = LeadActivityType.Assignment,
-            Notes = $"Assigned to user {request.UserId}",
-            CreatedByUserId = actorUserId,
-            CreatedAt = DateTimeOffset.UtcNow,
-            CreatedById = actorUserId
-        });
+        _journal.Stage(
+            societyId,
+            leadId,
+            actorUserId,
+            LeadJournalActions.CommercialAssigned,
+            "commercial_user",
+            request.UserId,
+            new { beforeUserId = prevAssign, afterUserId = request.UserId });
 
         await _app.SaveChangesAsync(cancellationToken);
         await ApplyScoreAsync(leadId, societyId, cancellationToken);
@@ -279,6 +421,7 @@ public sealed class LeadService : ILeadService
         ConvertLeadRequest request,
         CancellationToken cancellationToken = default)
     {
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
         var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
@@ -318,16 +461,14 @@ public sealed class LeadService : ILeadService
         lead.Status = LeadStatuses.Converted;
         lead.UpdatedAt = DateTimeOffset.UtcNow;
 
-        _app.LeadActivities.Add(new LeadActivity
-        {
-            SocietyId = societyId,
-            LeadId = leadId,
-            Type = LeadActivityType.Converted,
-            Notes = $"Client created: {client.Id}",
-            CreatedByUserId = actorUserId,
-            CreatedAt = DateTimeOffset.UtcNow,
-            CreatedById = actorUserId
-        });
+        _journal.Stage(
+            societyId,
+            leadId,
+            actorUserId,
+            LeadJournalActions.LeadConverted,
+            "client",
+            client.Id,
+            new { dealId = dealId, clientId = client.Id });
 
         await _app.SaveChangesAsync(cancellationToken);
 
@@ -343,22 +484,21 @@ public sealed class LeadService : ILeadService
 
     public async Task<LeadDto> MarkWonAsync(Guid societyId, Guid leadId, Guid actorUserId, CancellationToken cancellationToken = default)
     {
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
         var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
         lead.Status = LeadStatuses.Gagne;
         lead.UpdatedAt = DateTimeOffset.UtcNow;
 
-        _app.LeadActivities.Add(new LeadActivity
-        {
-            SocietyId = societyId,
-            LeadId = leadId,
-            Type = LeadActivityType.StatusChange,
-            Notes = "Marked as Won",
-            CreatedByUserId = actorUserId,
-            CreatedAt = DateTimeOffset.UtcNow,
-            CreatedById = actorUserId
-        });
+        _journal.Stage(
+            societyId,
+            leadId,
+            actorUserId,
+            LeadJournalActions.LeadMarkedWon,
+            "lead",
+            leadId,
+            new { status = lead.Status });
 
         await _app.SaveChangesAsync(cancellationToken);
         await ApplyScoreAsync(leadId, societyId, cancellationToken);
@@ -367,22 +507,21 @@ public sealed class LeadService : ILeadService
 
     public async Task<LeadDto> MarkLostAsync(Guid societyId, Guid leadId, Guid actorUserId, CancellationToken cancellationToken = default)
     {
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
         var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
         lead.Status = LeadStatuses.Perdu;
         lead.UpdatedAt = DateTimeOffset.UtcNow;
 
-        _app.LeadActivities.Add(new LeadActivity
-        {
-            SocietyId = societyId,
-            LeadId = leadId,
-            Type = LeadActivityType.StatusChange,
-            Notes = "Marked as Lost",
-            CreatedByUserId = actorUserId,
-            CreatedAt = DateTimeOffset.UtcNow,
-            CreatedById = actorUserId
-        });
+        _journal.Stage(
+            societyId,
+            leadId,
+            actorUserId,
+            LeadJournalActions.LeadMarkedLost,
+            "lead",
+            leadId,
+            new { status = lead.Status });
 
         await _app.SaveChangesAsync(cancellationToken);
         await ApplyScoreAsync(leadId, societyId, cancellationToken);
@@ -406,23 +545,40 @@ public sealed class LeadService : ILeadService
 
     public async Task<IReadOnlyList<LeadTimelineEntryDto>> GetTimelineAsync(
         Guid societyId,
+        Guid actorUserId,
         Guid leadId,
         CancellationToken cancellationToken = default)
     {
-        await EnsureLeadAsync(societyId, leadId, cancellationToken);
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
 
         var activityRows = await _app.LeadActivities.AsNoTracking()
             .Where(x => x.LeadId == leadId && x.SocietyId == societyId)
+            .Where(x =>
+                x.Type != LeadActivityType.Assignment
+                && x.Type != LeadActivityType.StatusChange
+                && x.Type != LeadActivityType.Converted)
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        var activities = activityRows.ConvertAll(x => new LeadTimelineEntryDto
+        var actorIds = activityRows.Select(x => x.CreatedByUserId).Where(x => x != Guid.Empty).Distinct().ToList();
+        var labels = await ResolveSocietyUserLabelsAsync(societyId, actorIds, cancellationToken);
+
+        var activities = activityRows.ConvertAll(x =>
         {
-            Kind = "activity",
-            At = x.CreatedAt,
-            Title = x.Type.ToString(),
-            Detail = x.Notes,
-            RefId = x.Id
+            labels.TryGetValue(x.CreatedByUserId, out var lab);
+            return new LeadTimelineEntryDto
+            {
+                Kind = "activity",
+                At = x.CreatedAt,
+                Title = x.Type.ToString(),
+                Detail = x.Notes,
+                RefId = x.Id,
+                CreatedByUserId = x.CreatedByUserId,
+                CreatorDisplayName = lab.FullName,
+                CreatorRoleLabel = lab.RoleLabel,
+                Rating = x.Rating,
+                ActivityType = x.Type
+            };
         });
 
         var quotes = await _app.Quotes.AsNoTracking()
@@ -434,20 +590,149 @@ public sealed class LeadService : ILeadService
                 At = x.CreatedAt,
                 Title = $"Quote {x.QuoteNumber}",
                 Detail = $"{x.Status} — {x.TotalAmount} {x.Currency}",
-                RefId = x.Id
+                RefId = x.Id,
+                CreatedByUserId = null,
+                CreatorDisplayName = null,
+                CreatorRoleLabel = null,
+                Rating = null,
+                ActivityType = null
             })
             .ToListAsync(cancellationToken);
 
         return activities.Concat(quotes).OrderByDescending(x => x.At).ToList();
     }
 
-    public async Task<LeadDto> RecalculateScoreAsync(Guid societyId, Guid leadId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<LeadJournalEntryDto>> GetJournalAsync(
+        Guid societyId,
+        Guid actorUserId,
+        Guid leadId,
+        CancellationToken cancellationToken = default)
     {
-        await EnsureLeadAsync(societyId, leadId, cancellationToken);
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
+        var raw = await _journal.ListForLeadAsync(societyId, leadId, cancellationToken);
+
+        var idSet = new HashSet<Guid>();
+        foreach (var e in raw)
+        {
+            if (e.ActorUserId != Guid.Empty)
+                idSet.Add(e.ActorUserId);
+            LeadJournalFrenchSummary.CollectUserIds(e.Action, e.MetadataJson, idSet);
+        }
+
+        var labels = await ResolveSocietyUserLabelsAsync(societyId, idSet.ToList(), cancellationToken);
+        await MergeUserNamesWithoutSocietyRoleAsync(idSet, labels, cancellationToken);
+
+        var list = new List<LeadJournalEntryDto>(raw.Count);
+        foreach (var e in raw)
+        {
+            labels.TryGetValue(e.ActorUserId, out var actorTuple);
+            var summary = LeadJournalFrenchSummary.Build(e.Action, e.MetadataJson, labels);
+            if (string.IsNullOrWhiteSpace(summary))
+                summary = LeadJournalFrenchSummary.FallbackSummary(e.Action);
+            if (e.Action == LeadJournalActions.ActivityCreated)
+                summary = "Création d’activité (entrée historique).";
+
+            list.Add(new LeadJournalEntryDto
+            {
+                Id = e.Id,
+                LeadId = e.LeadId,
+                Action = e.Action,
+                ActorUserId = e.ActorUserId,
+                CreatedAt = e.CreatedAt,
+                RelatedEntityType = e.RelatedEntityType,
+                RelatedEntityId = e.RelatedEntityId,
+                MetadataJson = e.MetadataJson,
+                ActorDisplayName = e.ActorUserId == Guid.Empty ? null : actorTuple.FullName,
+                ActorRoleLabel = e.ActorUserId == Guid.Empty ? null : actorTuple.RoleLabel,
+                SummaryFr = summary
+            });
+        }
+
+        return list;
+    }
+
+    /// <summary>Fills display names for users not linked via <see cref="UserSociety"/> (role: Utilisateur).</summary>
+    private async Task MergeUserNamesWithoutSocietyRoleAsync(
+        IReadOnlyCollection<Guid> candidateIds,
+        Dictionary<Guid, (string FullName, string RoleLabel)> labels,
+        CancellationToken cancellationToken)
+    {
+        var missing = candidateIds
+            .Where(id => id != Guid.Empty && !labels.ContainsKey(id))
+            .Distinct()
+            .ToList();
+        if (missing.Count == 0)
+            return;
+
+        var rows = await _core.Users.AsNoTracking()
+            .Where(u => !u.IsDeleted && missing.Contains(u.Id))
+            .Select(u => new { u.Id, u.FullName })
+            .ToListAsync(cancellationToken);
+
+        foreach (var r in rows)
+        {
+            if (string.IsNullOrWhiteSpace(r.FullName))
+                continue;
+            labels[r.Id] = (r.FullName.Trim(), "Utilisateur");
+        }
+    }
+
+    public async Task<LeadDto> RecalculateScoreAsync(Guid societyId, Guid actorUserId, Guid leadId, CancellationToken cancellationToken = default)
+    {
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
         await ApplyScoreAsync(leadId, societyId, cancellationToken);
         var row = await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken);
         return Map(row);
     }
+
+    private static LeadActivityDto MapActivity(LeadActivity row) => new()
+    {
+        Id = row.Id,
+        LeadId = row.LeadId,
+        Type = row.Type,
+        Notes = row.Notes,
+        Rating = row.Rating,
+        CreatedByUserId = row.CreatedByUserId,
+        CreatedAt = row.CreatedAt
+    };
+
+    private async Task<Dictionary<Guid, (string FullName, string RoleLabel)>> ResolveSocietyUserLabelsAsync(
+        Guid societyId,
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken)
+    {
+        var distinct = userIds.Where(x => x != Guid.Empty).Distinct().ToList();
+        if (distinct.Count == 0)
+            return new Dictionary<Guid, (string FullName, string RoleLabel)>();
+
+        var rows = await (
+            from us in _core.UserSocieties.AsNoTracking()
+            where us.SocietyId == societyId && !us.IsDeleted && distinct.Contains(us.UserId)
+            join u in _core.Users.AsNoTracking() on us.UserId equals u.Id
+            where !u.IsDeleted
+            join r in _core.Roles.AsNoTracking() on us.RoleId equals r.Id
+            select new { us.UserId, u.FullName, r.RoleType, r.Name }
+        ).ToListAsync(cancellationToken);
+
+        var dict = new Dictionary<Guid, (string FullName, string RoleLabel)>();
+        foreach (var x in rows)
+        {
+            if (dict.ContainsKey(x.UserId))
+                continue;
+            dict[x.UserId] = (x.FullName, RoleTypeToLabel(x.RoleType, x.Name));
+        }
+
+        return dict;
+    }
+
+    private static string RoleTypeToLabel(RoleType t, string roleName) =>
+        t switch
+        {
+            RoleType.Admin => "Administrateur",
+            RoleType.Manager => "Manager",
+            RoleType.Commercial => "Commercial",
+            _ => string.IsNullOrWhiteSpace(roleName) ? "Membre" : roleName
+        };
 
     private async Task ApplyScoreAsync(Guid leadId, Guid societyId, CancellationToken cancellationToken)
     {
@@ -455,6 +740,10 @@ public sealed class LeadService : ILeadService
 
         var activities = await _app.LeadActivities.AsNoTracking()
             .Where(x => x.LeadId == leadId && x.SocietyId == societyId)
+            .Where(x =>
+                x.Type != LeadActivityType.Assignment
+                && x.Type != LeadActivityType.StatusChange
+                && x.Type != LeadActivityType.Converted)
             .ToListAsync(cancellationToken);
 
         var snapshot = _scoring.Calculate(lead, activities);
@@ -465,10 +754,54 @@ public sealed class LeadService : ILeadService
         await _sdAutomation.ProcessAfterScoringAsync(lead, snapshot, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task EnsureLeadAsync(Guid societyId, Guid leadId, CancellationToken cancellationToken)
+    private async Task EnsureLeadAsync(Guid societyId, Guid actorUserId, Guid leadId, CancellationToken cancellationToken)
     {
-        if (!await _app.Leads.AnyAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken))
+        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, cancellationToken);
+        if (!await _app.Leads.AnyAsync(
+            x => x.Id == leadId && x.SocietyId == societyId
+                && ((x.CreatedById.HasValue && relatedUserIds.Contains(x.CreatedById.Value))
+                    || (x.AssignedToUserId.HasValue && relatedUserIds.Contains(x.AssignedToUserId.Value))),
+            cancellationToken))
             throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
+    }
+
+    private async Task<HashSet<Guid>> GetRelatedUserIdsAsync(Guid societyId, Guid actorUserId, CancellationToken cancellationToken)
+    {
+        var members = await _core.UserSocieties
+            .Where(x => x.SocietyId == societyId && !x.IsDeleted)
+            .Select(x => x.UserId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var memberSet = members.ToHashSet();
+
+        var related = new HashSet<Guid> { actorUserId };
+        if (!memberSet.Contains(actorUserId))
+            return related;
+
+        var actorCreatorId = await _core.Users
+            .Where(u => u.Id == actorUserId && !u.IsDeleted)
+            .Select(u => u.CreatedById)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (actorCreatorId.HasValue && memberSet.Contains(actorCreatorId.Value))
+            related.Add(actorCreatorId.Value);
+
+        var creatorCandidates = new List<Guid> { actorUserId };
+        if (actorCreatorId.HasValue)
+            creatorCandidates.Add(actorCreatorId.Value);
+
+        var subordinateIds = await _core.Users
+            .Where(u => !u.IsDeleted && u.CreatedById.HasValue && creatorCandidates.Contains(u.CreatedById.Value))
+            .Select(u => u.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var uid in subordinateIds)
+        {
+            if (memberSet.Contains(uid))
+                related.Add(uid);
+        }
+
+        return related;
     }
 
     private async Task EnsureUserInSocietyAsync(Guid societyId, Guid userId, CancellationToken cancellationToken)
@@ -717,6 +1050,7 @@ public sealed class LeadService : ILeadService
         if (string.IsNullOrWhiteSpace(request.Status))
             throw new AppException("VALIDATION_ERROR", "Status is required.", 400);
 
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
         var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
@@ -761,16 +1095,14 @@ public sealed class LeadService : ILeadService
         };
         lead.ApplyScoring(in snapshot);
 
-        _app.LeadActivities.Add(new LeadActivity
-        {
-            SocietyId = societyId,
-            LeadId = leadId,
-            Type = LeadActivityType.StatusChange,
-            Notes = $"{oldStatus} -> {newStatus} (score min: {minScore})",
-            CreatedByUserId = actorUserId,
-            CreatedAt = DateTimeOffset.UtcNow,
-            CreatedById = actorUserId
-        });
+        _journal.Stage(
+            societyId,
+            leadId,
+            actorUserId,
+            LeadJournalActions.LeadStatusChanged,
+            "lead",
+            leadId,
+            new { before = oldStatus, after = newStatus, minScore });
 
         await _app.SaveChangesAsync(cancellationToken);
 
@@ -796,6 +1128,7 @@ public sealed class LeadService : ILeadService
         ChangeLeadTemperatureRequest request,
         CancellationToken cancellationToken = default)
     {
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
         var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
@@ -834,17 +1167,20 @@ public sealed class LeadService : ILeadService
         lead.UpdatedAt  = DateTimeOffset.UtcNow;
         lead.UpdatedById = actorUserId;
 
-        // Log the manual temperature override as an activity
-        _app.LeadActivities.Add(new LeadActivity
-        {
-            SocietyId        = societyId,
-            LeadId           = leadId,
-            Type             = LeadActivityType.StatusChange,
-            Notes            = $"Température changée manuellement -> {newTemp} (score min: {minScore}, LVI: {newLvi:F1}, SD: {newSd:F1})",
-            CreatedByUserId  = actorUserId,
-            CreatedAt        = DateTimeOffset.UtcNow,
-            CreatedById      = actorUserId
-        });
+        _journal.Stage(
+            societyId,
+            leadId,
+            actorUserId,
+            LeadJournalActions.LeadTemperatureChanged,
+            "lead",
+            leadId,
+            new
+            {
+                temperature = newTemp.ToString(),
+                minScore,
+                lvi = newLvi,
+                sd = newSd
+            });
 
         await _app.SaveChangesAsync(cancellationToken);
 
@@ -853,10 +1189,12 @@ public sealed class LeadService : ILeadService
 
     public async Task<LeadDto> AddTagAsync(
         Guid societyId,
+        Guid actorUserId,
         Guid leadId,
         AddLeadTagRequest request,
         CancellationToken cancellationToken = default)
     {
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
         var tag = request.Tag?.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(tag))
             throw new AppException("VALIDATION_ERROR", "Tag cannot be empty.", 400);
@@ -879,10 +1217,12 @@ public sealed class LeadService : ILeadService
 
     public async Task<LeadDto> RemoveTagAsync(
         Guid societyId,
+        Guid actorUserId,
         Guid leadId,
         string tag,
         CancellationToken cancellationToken = default)
     {
+        await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
         var tagNorm = tag?.Trim().ToLowerInvariant() ?? string.Empty;
 
         var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)

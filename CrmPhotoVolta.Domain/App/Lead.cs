@@ -39,6 +39,7 @@ public class Lead : SocietyScopedEntity
     public List<string> Tags { get; set; } = new();
 
     public ICollection<LeadActivity> Activities { get; set; } = new List<LeadActivity>();
+    public ICollection<LeadJournalEntry> JournalEntries { get; set; } = new List<LeadJournalEntry>();
     public ICollection<Deal> Deals { get; set; } = new List<Deal>();
 
     public void ApplyScoring(in LeadScoreSnapshot snapshot)
