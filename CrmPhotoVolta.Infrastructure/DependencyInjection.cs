@@ -3,10 +3,12 @@ using CrmPhotoVolta.Application.Abstractions;
 using CrmPhotoVolta.Application.Auth;
 using CrmPhotoVolta.Application.Crm.Calendar;
 using CrmPhotoVolta.Application.Crm.Clients;
+using CrmPhotoVolta.Application.Crm.Contracts;
 using CrmPhotoVolta.Application.Crm.Dashboard;
 using CrmPhotoVolta.Application.Crm.Deals;
 using CrmPhotoVolta.Application.Crm.Documents;
 using CrmPhotoVolta.Application.Crm.Installations;
+using CrmPhotoVolta.Application.Crm.Invoices;
 using CrmPhotoVolta.Application.Crm.Leads;
 using CrmPhotoVolta.Application.Crm.Me;
 using CrmPhotoVolta.Application.Crm.Notifications;
@@ -92,6 +94,13 @@ public static class DependencyInjection
         services.AddScoped<ITenantProvisioningService, TenantProvisioningService>();
 
         services.AddScoped<ILeadService, LeadService>();
+        services.AddScoped<ILeadWonOrchestrationService, LeadWonOrchestrationService>();
+        services.AddScoped<IProjectDetailService, ProjectDetailService>();
+        services.AddScoped<IProjectTimelineService, ProjectTimelineService>();
+        services.AddScoped<IProjectWorkflowService, ProjectWorkflowService>();
+        services.AddScoped<IContractService, ContractService>();
+        services.AddScoped<IInvoiceService, InvoiceService>();
+        services.AddScoped<IProjectDocumentService, ProjectDocumentService>();
         services.AddScoped<IClientService, ClientService>();
         services.AddScoped<IProjectService, ProjectService>();
         services.AddScoped<IDealService, DealService>();

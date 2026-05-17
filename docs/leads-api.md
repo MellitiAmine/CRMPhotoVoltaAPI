@@ -67,7 +67,7 @@ The frontend should leverage the priorities (`Urgent`, `High`, `Low`) and temper
   Returns `ConvertLeadResultDto` (`lead`, `clientId`, `dealId`).
 
 - **Mark Outcomes:** 
-  - `POST /{id}/mark-won` (no payload)
+  - `POST /{id}/mark-won` (no payload) — returns `LeadWonResultDto` (`lead`, `clientId`, `projectId`, `quoteId`, `clientCreated`, `projectCreated`)
   - `POST /{id}/mark-lost` (no payload)
 
 ### Interactions & Tracking

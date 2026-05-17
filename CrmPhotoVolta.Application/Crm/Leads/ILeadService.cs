@@ -19,7 +19,7 @@ public interface ILeadService
 
     Task<LeadDto> AssignAsync(Guid societyId, Guid leadId, Guid actorUserId, AssignLeadRequest request, CancellationToken cancellationToken = default);
     Task<ConvertLeadResultDto> ConvertAsync(Guid societyId, Guid leadId, Guid actorUserId, ConvertLeadRequest request, CancellationToken cancellationToken = default);
-    Task<LeadDto> MarkWonAsync(Guid societyId, Guid leadId, Guid actorUserId, CancellationToken cancellationToken = default);
+    Task<LeadWonResultDto> MarkWonAsync(Guid societyId, Guid leadId, Guid actorUserId, CancellationToken cancellationToken = default);
     Task<LeadDto> MarkLostAsync(Guid societyId, Guid leadId, Guid actorUserId, CancellationToken cancellationToken = default);
     Task<LeadActivityDto> AddNoteAsync(Guid societyId, Guid leadId, Guid actorUserId, AddLeadNoteRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<LeadTimelineEntryDto>> GetTimelineAsync(Guid societyId, Guid leadId, CancellationToken cancellationToken = default);
