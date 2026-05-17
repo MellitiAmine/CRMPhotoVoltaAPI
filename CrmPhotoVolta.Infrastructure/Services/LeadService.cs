@@ -25,7 +25,7 @@ public sealed class LeadService : ILeadService
         CoreDbContext core,
         ILeadScoringService scoring,
         ILeadSdAutomationService sdAutomation,
-        ILeadJournalService journal)
+        ILeadJournalService journal,
         ILeadWonOrchestrationService wonOrchestration)
     {
         _app = app;
@@ -492,13 +492,8 @@ public sealed class LeadService : ILeadService
         CancellationToken cancellationToken = default)
     {
         await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
-        var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
-        _ = await _app.Leads.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
-            ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
         var orchestration = await _wonOrchestration.ProcessAsync(societyId, leadId, actorUserId, cancellationToken);
-        await ApplyScoreAsync(leadId, societyId, cancellationToken);
 
         _journal.Stage(
             societyId,
@@ -507,14 +502,19 @@ public sealed class LeadService : ILeadService
             LeadJournalActions.LeadMarkedWon,
             "lead",
             leadId,
-            new { status = lead.Status });
+            new
+            {
+                status = LeadStatuses.Gagne,
+                projectId = orchestration.ProjectId,
+                clientId = orchestration.ClientId
+            });
 
         await _app.SaveChangesAsync(cancellationToken);
         await ApplyScoreAsync(leadId, societyId, cancellationToken);
-        return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
+
         return new LeadWonResultDto
         {
-            Lead = await GetAsync(societyId, leadId, cancellationToken),
+            Lead = await GetAsync(societyId, actorUserId, leadId, cancellationToken),
             ClientId = orchestration.ClientId,
             ProjectId = orchestration.ProjectId,
             QuoteId = orchestration.QuoteId,
