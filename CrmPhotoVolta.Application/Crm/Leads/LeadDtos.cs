@@ -125,6 +125,13 @@ public sealed class AddLeadActivityRequest
     public int? Rating { get; init; }
 }
 
+public sealed class UpdateLeadActivityRequest
+{
+    public required LeadActivityType Type { get; init; }
+    public string? Notes { get; init; }
+    public int? Rating { get; init; }
+}
+
 public sealed class AssignLeadRequest
 {
     public Guid UserId { get; init; }
@@ -155,6 +162,26 @@ public sealed class LeadTimelineEntryDto
     public string Title { get; init; } = string.Empty;
     public string? Detail { get; init; }
     public Guid? RefId { get; init; }
+}
+
+public sealed class LeadJournalEntryDto
+{
+    public Guid Id { get; init; }
+    public Guid LeadId { get; init; }
+    public string Action { get; init; } = string.Empty;
+    public Guid ActorUserId { get; init; }
+    public DateTimeOffset CreatedAt { get; init; }
+    public string? RelatedEntityType { get; init; }
+    public Guid? RelatedEntityId { get; init; }
+    public string? MetadataJson { get; init; }
+
+    /// <summary>Resolved from core Users + society role (French labels).</summary>
+    public string? ActorDisplayName { get; init; }
+
+    public string? ActorRoleLabel { get; init; }
+
+    /// <summary>One-line French summary for admins (derived from action + metadata).</summary>
+    public string? SummaryFr { get; init; }
 }
 
 /// <summary>Request to manually change a lead's status (also applies minimum score floor).</summary>

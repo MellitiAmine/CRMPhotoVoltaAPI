@@ -14,6 +14,7 @@ using CrmPhotoVolta.Application.Crm.Me;
 using CrmPhotoVolta.Application.Crm.Notifications;
 using CrmPhotoVolta.Application.Crm.Pipeline;
 using CrmPhotoVolta.Application.Crm.Projects;
+using CrmPhotoVolta.Application.Crm.Commercials;
 using CrmPhotoVolta.Application.Crm.Items;
 using CrmPhotoVolta.Application.Crm.Quotes;
 using CrmPhotoVolta.Application.Crm.Reports;
@@ -93,6 +94,8 @@ public static class DependencyInjection
         services.AddScoped<IPlatformSubscriptionAdminService, PlatformSubscriptionAdminService>();
         services.AddScoped<ITenantProvisioningService, TenantProvisioningService>();
 
+        services.AddScoped<ICommercialService, CommercialService>();
+        services.AddScoped<ILeadJournalService, LeadJournalService>();
         services.AddScoped<ILeadService, LeadService>();
         services.AddScoped<ILeadWonOrchestrationService, LeadWonOrchestrationService>();
         services.AddScoped<IProjectDetailService, ProjectDetailService>();

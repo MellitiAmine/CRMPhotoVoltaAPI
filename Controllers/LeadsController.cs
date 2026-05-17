@@ -27,7 +27,8 @@ public sealed class LeadsController : TenantCrmControllerBase
     public async Task<IActionResult> List([FromQuery] PaginationQuery query, CancellationToken cancellationToken)
     {
         var societyId = RequireSociety();
-        var (items, meta) = await _leads.ListPagedAsync(societyId, query.ToRequest(), cancellationToken);
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var (items, meta) = await _leads.ListPagedAsync(societyId, actorId, query.ToRequest(), cancellationToken);
         return Ok(ApiResponse.OkPaged(items, meta));
     }
 
@@ -35,7 +36,8 @@ public sealed class LeadsController : TenantCrmControllerBase
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
     {
         var societyId = RequireSociety();
-        var item = await _leads.GetAsync(societyId, id, cancellationToken);
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var item = await _leads.GetAsync(societyId, actorId, id, cancellationToken);
         return Ok(ApiResponse.Ok(item));
     }
 
@@ -53,7 +55,8 @@ public sealed class LeadsController : TenantCrmControllerBase
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateLeadRequest request, CancellationToken cancellationToken)
     {
         var societyId = RequireSociety();
-        var updated = await _leads.UpdateAsync(societyId, id, request, cancellationToken);
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var updated = await _leads.UpdateAsync(societyId, actorId, id, request, cancellationToken);
         return Ok(ApiResponse.Ok(updated));
     }
 
@@ -61,7 +64,8 @@ public sealed class LeadsController : TenantCrmControllerBase
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
         var societyId = RequireSociety();
-        await _leads.DeleteAsync(societyId, id, cancellationToken);
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        await _leads.DeleteAsync(societyId, actorId, id, cancellationToken);
         return Ok(ApiResponse.Ok(new { deleted = true }));
     }
 
@@ -69,7 +73,8 @@ public sealed class LeadsController : TenantCrmControllerBase
     public async Task<IActionResult> ListActivities(Guid id, CancellationToken cancellationToken)
     {
         var societyId = RequireSociety();
-        var list = await _leads.ListActivitiesAsync(societyId, id, cancellationToken);
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var list = await _leads.ListActivitiesAsync(societyId, actorId, id, cancellationToken);
         return Ok(ApiResponse.Ok(list));
     }
 
@@ -81,6 +86,24 @@ public sealed class LeadsController : TenantCrmControllerBase
         var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
         var created = await _leads.AddActivityAsync(societyId, id, actorId, request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(created));
+    }
+
+    [HttpPut("{id:guid}/activities/{activityId:guid}")]
+    public async Task<IActionResult> UpdateActivity(Guid id, Guid activityId, [FromBody] UpdateLeadActivityRequest request, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var updated = await _leads.UpdateActivityAsync(societyId, id, activityId, actorId, request, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
+    }
+
+    [HttpDelete("{id:guid}/activities/{activityId:guid}")]
+    public async Task<IActionResult> DeleteActivity(Guid id, Guid activityId, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        await _leads.DeleteActivityAsync(societyId, id, activityId, actorId, cancellationToken);
+        return Ok(ApiResponse.Ok(new { deleted = true }));
     }
 
     [HttpPost("{id:guid}/assign")]
@@ -135,7 +158,17 @@ public sealed class LeadsController : TenantCrmControllerBase
     public async Task<IActionResult> Timeline(Guid id, CancellationToken cancellationToken)
     {
         var societyId = RequireSociety();
-        var list = await _leads.GetTimelineAsync(societyId, id, cancellationToken);
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var list = await _leads.GetTimelineAsync(societyId, actorId, id, cancellationToken);
+        return Ok(ApiResponse.Ok(list));
+    }
+
+    [HttpGet("{id:guid}/journal")]
+    public async Task<IActionResult> Journal(Guid id, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var list = await _leads.GetJournalAsync(societyId, actorId, id, cancellationToken);
         return Ok(ApiResponse.Ok(list));
     }
 
@@ -144,7 +177,8 @@ public sealed class LeadsController : TenantCrmControllerBase
     public async Task<IActionResult> RecalculateScore(Guid id, CancellationToken cancellationToken)
     {
         var societyId = RequireSociety();
-        var updated = await _leads.RecalculateScoreAsync(societyId, id, cancellationToken);
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var updated = await _leads.RecalculateScoreAsync(societyId, actorId, id, cancellationToken);
         return Ok(ApiResponse.Ok(updated));
     }
 
@@ -174,7 +208,8 @@ public sealed class LeadsController : TenantCrmControllerBase
     public async Task<IActionResult> AddTag(Guid id, [FromBody] AddLeadTagRequest request, CancellationToken cancellationToken)
     {
         var societyId = RequireSociety();
-        var updated = await _leads.AddTagAsync(societyId, id, request, cancellationToken);
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var updated = await _leads.AddTagAsync(societyId, actorId, id, request, cancellationToken);
         return Ok(ApiResponse.Ok(updated));
     }
 
@@ -182,7 +217,8 @@ public sealed class LeadsController : TenantCrmControllerBase
     public async Task<IActionResult> RemoveTag(Guid id, string tag, CancellationToken cancellationToken)
     {
         var societyId = RequireSociety();
-        var updated = await _leads.RemoveTagAsync(societyId, id, tag, cancellationToken);
+        var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var updated = await _leads.RemoveTagAsync(societyId, actorId, id, tag, cancellationToken);
         return Ok(ApiResponse.Ok(updated));
     }
 }
