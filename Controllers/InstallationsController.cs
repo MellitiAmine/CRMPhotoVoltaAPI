@@ -20,11 +20,38 @@ public sealed class InstallationsController : TenantCrmControllerBase
         _installations = installations;
     }
 
+    [HttpGet]
+    public async Task<IActionResult> List(
+        [FromQuery] PaginationQuery query,
+        [FromQuery] Guid? projectId,
+        [FromQuery] Guid? technicianId,
+        CancellationToken cancellationToken)
+    {
+        var (items, meta) = await _installations.ListPagedAsync(
+            RequireSociety(), projectId, technicianId, query.ToRequest(), cancellationToken);
+        return Ok(ApiResponse.OkPaged(items, meta));
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
     {
         var item = await _installations.GetAsync(RequireSociety(), id, cancellationToken);
         return Ok(ApiResponse.Ok(item));
+    }
+
+    [HttpPost]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status201Created)]
+    public async Task<IActionResult> Create([FromBody] CreateInstallationRequest request, CancellationToken cancellationToken)
+    {
+        var created = await _installations.CreateAsync(RequireSociety(), request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(created));
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateInstallationRequest request, CancellationToken cancellationToken)
+    {
+        var updated = await _installations.UpdateAsync(RequireSociety(), id, request, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
     }
 
     [HttpPost("{id:guid}/start")]

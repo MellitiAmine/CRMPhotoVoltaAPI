@@ -1,45 +1,235 @@
+using CrmPhotoVolta.Application.Common;
 using CrmPhotoVolta.Application.Crm.Installations;
+using CrmPhotoVolta.Application.Crm.Projects;
 using CrmPhotoVolta.Application.Exceptions;
 using CrmPhotoVolta.Domain.App;
 using CrmPhotoVolta.Infrastructure.Data.App;
+using CrmPhotoVolta.Infrastructure.Data.Core;
 using Microsoft.EntityFrameworkCore;
 
 namespace CrmPhotoVolta.Infrastructure.Services;
 
 public sealed class InstallationWorkflowService : IInstallationWorkflowService
 {
-    private readonly AppDbContext _app;
+    private static readonly string[] DefaultChecklist =
+    [
+        "Préparation chantier",
+        "Pose structure / rails",
+        "Pose panneaux",
+        "Câblage DC / AC",
+        "Mise en service",
+        "Contrôle qualité / photos"
+    ];
 
-    public InstallationWorkflowService(AppDbContext app)
+    private readonly AppDbContext _app;
+    private readonly CoreDbContext _core;
+
+    public InstallationWorkflowService(AppDbContext app, CoreDbContext core)
     {
         _app = app;
+        _core = core;
+    }
+
+    public async Task<(IReadOnlyList<InstallationListItemDto> Items, PaginationMeta Meta)> ListPagedAsync(
+        Guid societyId,
+        Guid? projectId,
+        Guid? technicianId,
+        PaginationRequest pagination,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _app.Installations.AsNoTracking()
+            .Include(x => x.Project).ThenInclude(p => p.Client)
+            .Include(x => x.Checklist)
+            .Where(x => x.SocietyId == societyId);
+
+        if (projectId is { } pid)
+            query = query.Where(x => x.ProjectId == pid);
+
+        if (technicianId is { } tid)
+            query = query.Where(x => x.TechnicianId == tid);
+
+        if (!string.IsNullOrWhiteSpace(pagination.Search))
+        {
+            var s = pagination.Search.Trim().ToLowerInvariant();
+            query = query.Where(x =>
+                x.Project.Name.ToLower().Contains(s) ||
+                (x.Project.Reference != null && x.Project.Reference.ToLower().Contains(s)) ||
+                x.Project.Client!.Name.ToLower().Contains(s));
+        }
+
+        var total = await query.CountAsync(cancellationToken);
+
+        query = pagination.SortOrder.Equals("asc", StringComparison.OrdinalIgnoreCase)
+            ? query.OrderBy(x => x.Date)
+            : query.OrderByDescending(x => x.Date);
+
+        var rows = await query
+            .Skip((pagination.Page - 1) * pagination.PageSize)
+            .Take(pagination.PageSize)
+            .ToListAsync(cancellationToken);
+
+        var techNames = await ProjectUserNameResolver.LoadNamesAsync(
+            _core, rows.Select(x => (Guid?)x.TechnicianId), cancellationToken);
+
+        var items = rows.Select(x => MapListItem(x, ProjectUserNameResolver.Resolve(techNames, x.TechnicianId))).ToList();
+        return (items, pagination.ToMeta(total));
+    }
+
+    public async Task<IReadOnlyList<InstallationListItemDto>> ListByProjectAsync(
+        Guid societyId,
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureProjectAsync(societyId, projectId, cancellationToken);
+
+        var rows = await _app.Installations.AsNoTracking()
+            .Include(x => x.Project).ThenInclude(p => p.Client)
+            .Include(x => x.Checklist)
+            .Where(x => x.SocietyId == societyId && x.ProjectId == projectId)
+            .OrderByDescending(x => x.Date)
+            .ToListAsync(cancellationToken);
+
+        var techNames = await ProjectUserNameResolver.LoadNamesAsync(
+            _core, rows.Select(x => (Guid?)x.TechnicianId), cancellationToken);
+
+        return rows.Select(x => MapListItem(x, ProjectUserNameResolver.Resolve(techNames, x.TechnicianId))).ToList();
     }
 
     public async Task<InstallationDto> GetAsync(Guid societyId, Guid installationId, CancellationToken cancellationToken = default)
     {
         var inst = await LoadInstallationAsync(societyId, installationId, cancellationToken);
         TenantGuard.EnsureSameTenant(inst, societyId);
-        return Map(inst);
+        return await MapDetailAsync(inst, cancellationToken);
+    }
+
+    public async Task<InstallationDto> CreateAsync(
+        Guid societyId,
+        CreateInstallationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var project = await _app.Projects.AsNoTracking()
+            .Include(p => p.Client)
+            .FirstOrDefaultAsync(p => p.Id == request.ProjectId && p.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("PROJECT_NOT_FOUND", "Project not found.", 404);
+
+        await EnsureUserInSocietyAsync(societyId, request.TechnicianId, cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        var inst = new Installation
+        {
+            SocietyId = societyId,
+            ProjectId = request.ProjectId,
+            TechnicianId = request.TechnicianId,
+            Date = request.Date,
+            Status = InstallationStatus.Scheduled,
+            CreatedAt = now
+        };
+
+        var checklistLabels = request.DefaultChecklistItems.Count > 0
+            ? request.DefaultChecklistItems
+            : DefaultChecklist;
+
+        foreach (var label in checklistLabels.Where(x => !string.IsNullOrWhiteSpace(x)))
+        {
+            inst.Checklist.Add(new InstallationChecklistItem
+            {
+                SocietyId = societyId,
+                Item = label.Trim(),
+                IsCompleted = false,
+                CreatedAt = now
+            });
+        }
+
+        _app.Installations.Add(inst);
+
+        _app.ProjectTimelineEvents.Add(new ProjectTimelineEvent
+        {
+            SocietyId = societyId,
+            ProjectId = request.ProjectId,
+            Type = ProjectTimelineEventType.InstallationPlanned,
+            Description = $"Installation planifiée le {request.Date:dd/MM/yyyy}.",
+            CreatedAt = now
+        });
+
+        await _app.SaveChangesAsync(cancellationToken);
+
+        return await GetAsync(societyId, inst.Id, cancellationToken);
+    }
+
+    public async Task<InstallationDto> UpdateAsync(
+        Guid societyId,
+        Guid installationId,
+        UpdateInstallationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var inst = await LoadInstallationTrackedAsync(societyId, installationId, cancellationToken);
+        await EnsureUserInSocietyAsync(societyId, request.TechnicianId, cancellationToken);
+
+        inst.TechnicianId = request.TechnicianId;
+        inst.Date = request.Date;
+        if (request.Status is { } status)
+            inst.Status = status;
+        inst.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await _app.SaveChangesAsync(cancellationToken);
+        return await GetAsync(societyId, installationId, cancellationToken);
     }
 
     public async Task<InstallationDto> StartAsync(Guid societyId, Guid installationId, CancellationToken cancellationToken = default)
     {
         var inst = await LoadInstallationTrackedAsync(societyId, installationId, cancellationToken);
         TenantGuard.EnsureSameTenant(inst, societyId);
+
+        var now = DateTimeOffset.UtcNow;
         inst.Status = InstallationStatus.InProgress;
-        inst.UpdatedAt = DateTimeOffset.UtcNow;
+        inst.UpdatedAt = now;
+
+        _app.ProjectTimelineEvents.Add(new ProjectTimelineEvent
+        {
+            SocietyId = societyId,
+            ProjectId = inst.ProjectId,
+            Type = ProjectTimelineEventType.InstallationStarted,
+            Description = "Installation démarrée sur site.",
+            CreatedAt = now
+        });
+
         await _app.SaveChangesAsync(cancellationToken);
-        return Map(await LoadInstallationAsync(societyId, installationId, cancellationToken));
+        return await GetAsync(societyId, installationId, cancellationToken);
     }
 
     public async Task<InstallationDto> CompleteAsync(Guid societyId, Guid installationId, CancellationToken cancellationToken = default)
     {
         var inst = await LoadInstallationTrackedAsync(societyId, installationId, cancellationToken);
         TenantGuard.EnsureSameTenant(inst, societyId);
+
+        var now = DateTimeOffset.UtcNow;
         inst.Status = InstallationStatus.Completed;
-        inst.UpdatedAt = DateTimeOffset.UtcNow;
+        inst.UpdatedAt = now;
+
+        var project = await _app.Projects
+            .FirstOrDefaultAsync(p => p.Id == inst.ProjectId && p.SocietyId == societyId, cancellationToken);
+
+        if (project is not null)
+        {
+            if (project.Status == ProjectStatus.Installation || project.Status == ProjectStatus.Planning)
+                project.Status = ProjectStatus.Activated;
+
+            project.ProgressPercent = Math.Max(project.ProgressPercent, 90);
+            project.LastActivityAt = now;
+            project.UpdatedAt = now;
+        }
+
+        _app.ProjectTimelineEvents.Add(new ProjectTimelineEvent
+        {
+            SocietyId = societyId,
+            ProjectId = inst.ProjectId,
+            Type = ProjectTimelineEventType.InstallationCompleted,
+            Description = "Installation terminée.",
+            CreatedAt = now
+        });
+
         await _app.SaveChangesAsync(cancellationToken);
-        return Map(await LoadInstallationAsync(societyId, installationId, cancellationToken));
+        return await GetAsync(societyId, installationId, cancellationToken);
     }
 
     public async Task<IReadOnlyList<InstallationChecklistItemDto>> UpdateChecklistAsync(
@@ -79,15 +269,16 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
         if (string.IsNullOrWhiteSpace(request.Url))
             throw new AppException("VALIDATION_ERROR", "Url is required.", 400);
 
-        _ = await LoadInstallationTrackedAsync(societyId, installationId, cancellationToken);
+        var inst = await LoadInstallationTrackedAsync(societyId, installationId, cancellationToken);
 
+        var now = DateTimeOffset.UtcNow;
         var photo = new InstallationPhoto
         {
             SocietyId = societyId,
             InstallationId = installationId,
             Url = request.Url.Trim(),
-            UploadedAt = DateTimeOffset.UtcNow,
-            CreatedAt = DateTimeOffset.UtcNow
+            UploadedAt = now,
+            CreatedAt = now
         };
 
         _app.InstallationPhotos.Add(photo);
@@ -101,11 +292,27 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
         };
     }
 
+    private async Task EnsureProjectAsync(Guid societyId, Guid projectId, CancellationToken cancellationToken)
+    {
+        if (!await _app.Projects.AnyAsync(p => p.Id == projectId && p.SocietyId == societyId, cancellationToken))
+            throw new AppException("PROJECT_NOT_FOUND", "Project not found.", 404);
+    }
+
+    private async Task EnsureUserInSocietyAsync(Guid societyId, Guid userId, CancellationToken cancellationToken)
+    {
+        var ok = await _core.UserSocieties.AnyAsync(
+            x => x.UserId == userId && x.SocietyId == societyId && !x.IsDeleted,
+            cancellationToken);
+
+        if (!ok)
+            throw new AppException("USER_NOT_IN_SOCIETY", "The selected user is not a member of this society.", 400);
+    }
+
     private async Task<Installation> LoadInstallationAsync(Guid societyId, Guid installationId, CancellationToken cancellationToken) =>
         await _app.Installations.AsNoTracking()
             .Include(x => x.Checklist)
             .Include(x => x.Photos)
-            .Include(x => x.Project)
+            .Include(x => x.Project).ThenInclude(p => p.Client)
             .FirstOrDefaultAsync(x => x.Id == installationId && x.SocietyId == societyId, cancellationToken)
         ?? throw new AppException("INSTALLATION_NOT_FOUND", "Installation not found.", 404);
 
@@ -115,20 +322,54 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
             .FirstOrDefaultAsync(x => x.Id == installationId && x.SocietyId == societyId, cancellationToken)
         ?? throw new AppException("INSTALLATION_NOT_FOUND", "Installation not found.", 404);
 
-    private static InstallationDto Map(Installation x) => new()
+    private async Task<InstallationDto> MapDetailAsync(Installation x, CancellationToken cancellationToken)
     {
-        Id = x.Id,
-        ProjectId = x.ProjectId,
-        TechnicianId = x.TechnicianId,
-        Date = x.Date,
-        Status = x.Status,
-        Checklist = x.Checklist
-            .OrderBy(c => c.Item)
-            .Select(c => new InstallationChecklistItemDto { Id = c.Id, Item = c.Item, IsCompleted = c.IsCompleted })
-            .ToList(),
-        Photos = x.Photos
-            .OrderByDescending(p => p.UploadedAt)
-            .Select(p => new InstallationPhotoDto { Id = p.Id, Url = p.Url, UploadedAt = p.UploadedAt })
-            .ToList()
-    };
+        var techName = await _core.Users.AsNoTracking()
+            .Where(u => u.Id == x.TechnicianId)
+            .Select(u => u.FullName)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return new InstallationDto
+        {
+            Id = x.Id,
+            ProjectId = x.ProjectId,
+            ProjectReference = x.Project.Reference,
+            ProjectName = x.Project.Name,
+            ClientName = x.Project.Client?.Name ?? string.Empty,
+            TechnicianId = x.TechnicianId,
+            TechnicianName = techName,
+            Date = x.Date,
+            Status = x.Status,
+            Checklist = x.Checklist
+                .OrderBy(c => c.Item)
+                .Select(c => new InstallationChecklistItemDto { Id = c.Id, Item = c.Item, IsCompleted = c.IsCompleted })
+                .ToList(),
+            Photos = x.Photos
+                .OrderByDescending(p => p.UploadedAt)
+                .Select(p => new InstallationPhotoDto { Id = p.Id, Url = p.Url, UploadedAt = p.UploadedAt })
+                .ToList(),
+            CreatedAt = x.CreatedAt,
+            UpdatedAt = x.UpdatedAt
+        };
+    }
+
+    private static InstallationListItemDto MapListItem(Installation x, string? technicianName)
+    {
+        var checklist = x.Checklist;
+        return new InstallationListItemDto
+        {
+            Id = x.Id,
+            ProjectId = x.ProjectId,
+            ProjectReference = x.Project.Reference,
+            ProjectName = x.Project.Name,
+            ClientName = x.Project.Client?.Name ?? string.Empty,
+            TechnicianId = x.TechnicianId,
+            TechnicianName = technicianName,
+            Date = x.Date,
+            Status = x.Status,
+            ChecklistCompleted = checklist.Count(c => c.IsCompleted),
+            ChecklistTotal = checklist.Count,
+            CreatedAt = x.CreatedAt
+        };
+    }
 }

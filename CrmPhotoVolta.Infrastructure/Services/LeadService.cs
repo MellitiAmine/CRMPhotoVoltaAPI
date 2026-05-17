@@ -18,6 +18,7 @@ public sealed class LeadService : ILeadService
     private readonly ILeadScoringService _scoring;
     private readonly ILeadSdAutomationService _sdAutomation;
     private readonly ILeadJournalService _journal;
+    private readonly ILeadWonOrchestrationService _wonOrchestration;
 
     public LeadService(
         AppDbContext app,
@@ -25,12 +26,14 @@ public sealed class LeadService : ILeadService
         ILeadScoringService scoring,
         ILeadSdAutomationService sdAutomation,
         ILeadJournalService journal)
+        ILeadWonOrchestrationService wonOrchestration)
     {
         _app = app;
         _core = core;
         _scoring = scoring;
         _sdAutomation = sdAutomation;
         _journal = journal;
+        _wonOrchestration = wonOrchestration;
     }
 
     private static bool IsLegacyAuditActivityType(LeadActivityType t) =>
@@ -482,14 +485,20 @@ public sealed class LeadService : ILeadService
         };
     }
 
-    public async Task<LeadDto> MarkWonAsync(Guid societyId, Guid leadId, Guid actorUserId, CancellationToken cancellationToken = default)
+    public async Task<LeadWonResultDto> MarkWonAsync(
+        Guid societyId,
+        Guid leadId,
+        Guid actorUserId,
+        CancellationToken cancellationToken = default)
     {
         await EnsureLeadAsync(societyId, actorUserId, leadId, cancellationToken);
         var lead = await _app.Leads.FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
+        _ = await _app.Leads.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == leadId && x.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 
-        lead.Status = LeadStatuses.Gagne;
-        lead.UpdatedAt = DateTimeOffset.UtcNow;
+        var orchestration = await _wonOrchestration.ProcessAsync(societyId, leadId, actorUserId, cancellationToken);
+        await ApplyScoreAsync(leadId, societyId, cancellationToken);
 
         _journal.Stage(
             societyId,
@@ -503,6 +512,15 @@ public sealed class LeadService : ILeadService
         await _app.SaveChangesAsync(cancellationToken);
         await ApplyScoreAsync(leadId, societyId, cancellationToken);
         return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
+        return new LeadWonResultDto
+        {
+            Lead = await GetAsync(societyId, leadId, cancellationToken),
+            ClientId = orchestration.ClientId,
+            ProjectId = orchestration.ProjectId,
+            QuoteId = orchestration.QuoteId,
+            ClientCreated = orchestration.ClientCreated,
+            ProjectCreated = orchestration.ProjectCreated
+        };
     }
 
     public async Task<LeadDto> MarkLostAsync(Guid societyId, Guid leadId, Guid actorUserId, CancellationToken cancellationToken = default)

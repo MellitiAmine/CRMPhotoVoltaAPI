@@ -76,15 +76,25 @@ public sealed class QuoteService : IQuoteService
         if (string.IsNullOrWhiteSpace(request.Title))
             throw new AppException("VALIDATION_ERROR", "Title is required.", 400);
 
-        await ValidateLinksAsync(societyId, request.LeadId, request.ClientId, request.DealId, cancellationToken);
+        var leadId = QuoteLinkResolver.Normalize(request.LeadId);
+        var clientId = QuoteLinkResolver.Normalize(request.ClientId);
+        var dealId = QuoteLinkResolver.Normalize(request.DealId);
+
+        if (leadId is null && clientId is null && dealId is null)
+            throw new AppException(
+                "VALIDATION_ERROR",
+                "At least one of leadId, clientId, or dealId is required.",
+                400);
+
+        await ValidateLinksAsync(societyId, leadId, clientId, dealId, cancellationToken);
 
         var number = await NextQuoteNumberAsync(societyId, cancellationToken);
         var quote = new Quote
         {
             SocietyId = societyId,
-            LeadId = request.LeadId,
-            ClientId = request.ClientId,
-            DealId = request.DealId,
+            LeadId = leadId,
+            ClientId = clientId,
+            DealId = dealId,
             QuoteNumber = number,
             Title = request.Title.Trim(),
             Status = QuoteStatus.Draft,
@@ -95,7 +105,7 @@ public sealed class QuoteService : IQuoteService
         };
 
         _app.Quotes.Add(quote);
-        await ReplaceItemsAsync(quote, societyId, request.Items, cancellationToken);
+        await ReplaceItemsAsync(quote, societyId, request.Items ?? Array.Empty<QuoteItemWriteDto>(), cancellationToken);
         await _app.SaveChangesAsync(cancellationToken);
 
         return Map(await ReloadQuoteAsync(quote.Id, cancellationToken));
@@ -114,19 +124,29 @@ public sealed class QuoteService : IQuoteService
         if (quote.Status != QuoteStatus.Draft)
             throw new AppException("QUOTE_LOCKED", "Only draft quotes can be edited.", 409);
 
-        await ValidateLinksAsync(societyId, request.LeadId, request.ClientId, request.DealId, cancellationToken);
+        var leadId = QuoteLinkResolver.Normalize(request.LeadId);
+        var clientId = QuoteLinkResolver.Normalize(request.ClientId);
+        var dealId = QuoteLinkResolver.Normalize(request.DealId);
+
+        if (leadId is null && clientId is null && dealId is null)
+            throw new AppException(
+                "VALIDATION_ERROR",
+                "At least one of leadId, clientId, or dealId is required.",
+                400);
+
+        await ValidateLinksAsync(societyId, leadId, clientId, dealId, cancellationToken);
 
         quote.Title = request.Title.Trim();
         quote.Currency = string.IsNullOrWhiteSpace(request.Currency) ? "TND" : request.Currency.Trim().ToUpperInvariant();
         quote.ValidUntil = request.ValidUntil;
-        quote.LeadId = request.LeadId;
-        quote.ClientId = request.ClientId;
-        quote.DealId = request.DealId;
+        quote.LeadId = leadId;
+        quote.ClientId = clientId;
+        quote.DealId = dealId;
         quote.UpdatedAt = DateTimeOffset.UtcNow;
 
         _app.QuoteItems.RemoveRange(quote.Items);
         quote.Items.Clear();
-        await ReplaceItemsAsync(quote, societyId, request.Items, cancellationToken);
+        await ReplaceItemsAsync(quote, societyId, request.Items ?? Array.Empty<QuoteItemWriteDto>(), cancellationToken);
 
         await _app.SaveChangesAsync(cancellationToken);
 
@@ -248,7 +268,14 @@ public sealed class QuoteService : IQuoteService
 
     private async Task ReplaceItemsAsync(Quote quote, Guid societyId, IReadOnlyList<QuoteItemWriteDto> items, CancellationToken cancellationToken)
     {
-        var itemIds = items.Where(x => x.ItemId.HasValue).Select(x => x.ItemId!.Value).Distinct().ToList();
+        items ??= Array.Empty<QuoteItemWriteDto>();
+
+        var itemIds = items
+            .Select(x => QuoteLinkResolver.Normalize(x.ItemId))
+            .Where(x => x.HasValue)
+            .Select(x => x!.Value)
+            .Distinct()
+            .ToList();
         var catalog = itemIds.Count == 0
             ? new Dictionary<Guid, Item>()
             : await _app.Items.AsNoTracking()
@@ -258,7 +285,8 @@ public sealed class QuoteService : IQuoteService
         var order = 0;
         foreach (var line in items)
         {
-            if (!line.ItemId.HasValue && string.IsNullOrWhiteSpace(line.Description))
+            var lineItemId = QuoteLinkResolver.Normalize(line.ItemId);
+            if (lineItemId is null && string.IsNullOrWhiteSpace(line.Description))
                 continue;
 
             var discount = line.Discount ?? 0;
@@ -268,9 +296,9 @@ public sealed class QuoteService : IQuoteService
             var unitPrice = line.UnitPrice;
             decimal tvaRate;
             string desc;
-            Guid? itemId = line.ItemId;
+            Guid? itemId = lineItemId;
 
-            if (line.ItemId is { } iid)
+            if (lineItemId is { } iid)
             {
                 if (!catalog.TryGetValue(iid, out var cat))
                     throw new AppException("ITEM_NOT_FOUND", "Item not found.", 404);
@@ -312,10 +340,16 @@ public sealed class QuoteService : IQuoteService
     {
         var year = DateTime.UtcNow.Year;
         var prefix = $"Q-{year}-";
-        var count = await _app.Quotes.CountAsync(
-            x => x.SocietyId == societyId && x.QuoteNumber.StartsWith(prefix),
-            cancellationToken);
-        return $"{prefix}{(count + 1):D4}";
+
+        // Include soft-deleted rows: unique index (SocietyId, QuoteNumber) still reserves the number.
+        var existing = await _app.Quotes
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(x => x.SocietyId == societyId && x.QuoteNumber.StartsWith(prefix))
+            .Select(x => x.QuoteNumber)
+            .ToListAsync(cancellationToken);
+
+        return SequentialReferenceGenerator.Next(prefix, existing);
     }
 
     private async Task ValidateLinksAsync(
@@ -325,6 +359,10 @@ public sealed class QuoteService : IQuoteService
         Guid? dealId,
         CancellationToken cancellationToken)
     {
+        leadId = QuoteLinkResolver.Normalize(leadId);
+        clientId = QuoteLinkResolver.Normalize(clientId);
+        dealId = QuoteLinkResolver.Normalize(dealId);
+
         if (leadId is { } l && !await _app.Leads.AnyAsync(x => x.Id == l && x.SocietyId == societyId, cancellationToken))
             throw new AppException("LEAD_NOT_FOUND", "Lead not found.", 404);
 

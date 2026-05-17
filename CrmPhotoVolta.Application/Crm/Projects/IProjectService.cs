@@ -19,5 +19,6 @@ public interface IProjectService
     Task<ProjectProgressDto> GetProgressAsync(Guid societyId, Guid projectId, CancellationToken cancellationToken = default);
     Task<ProjectDto> AssignTechnicianAsync(Guid societyId, Guid projectId, AssignProjectUserRequest request, CancellationToken cancellationToken = default);
     Task<ProjectDto> AssignManagerAsync(Guid societyId, Guid projectId, AssignProjectUserRequest request, CancellationToken cancellationToken = default);
+    Task<ProjectDto> AssignCommercialAsync(Guid societyId, Guid projectId, AssignProjectUserRequest request, CancellationToken cancellationToken = default);
     Task<ProjectDto> UpdateProgressAsync(Guid societyId, Guid projectId, PatchProjectProgressRequest request, CancellationToken cancellationToken = default);
 }

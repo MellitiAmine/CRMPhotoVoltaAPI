@@ -126,12 +126,13 @@ public sealed class LeadsController : TenantCrmControllerBase
     }
 
     [HttpPost("{id:guid}/mark-won")]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> MarkWon(Guid id, CancellationToken cancellationToken)
     {
         var societyId = RequireSociety();
         var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
-        var updated = await _leads.MarkWonAsync(societyId, id, actorId, cancellationToken);
-        return Ok(ApiResponse.Ok(updated));
+        var result = await _leads.MarkWonAsync(societyId, id, actorId, cancellationToken);
+        return Ok(ApiResponse.Ok(result));
     }
 
     [HttpPost("{id:guid}/mark-lost")]
