@@ -162,6 +162,11 @@ public sealed class LeadTimelineEntryDto
     public string Title { get; init; } = string.Empty;
     public string? Detail { get; init; }
     public Guid? RefId { get; init; }
+    public Guid? CreatedByUserId { get; init; }
+    public string? CreatorDisplayName { get; init; }
+    public string? CreatorRoleLabel { get; init; }
+    public int? Rating { get; init; }
+    public LeadActivityType? ActivityType { get; init; }
 }
 
 public sealed class LeadJournalEntryDto
