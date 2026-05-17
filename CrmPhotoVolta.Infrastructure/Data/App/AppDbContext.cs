@@ -22,6 +22,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<Deal> Deals => Set<Deal>();
     public DbSet<PipelineStage> PipelineStages => Set<PipelineStage>();
     public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectTimelineEvent> ProjectTimelineEvents => Set<ProjectTimelineEvent>();
     public DbSet<ProjectStage> ProjectStages => Set<ProjectStage>();
     public DbSet<ProjectStageTracking> ProjectStageTrackings => Set<ProjectStageTracking>();
     public DbSet<CrmTask> Tasks => Set<CrmTask>();
@@ -33,6 +34,11 @@ public sealed class AppDbContext : DbContext
     public DbSet<Item> Items => Set<Item>();
     public DbSet<Quote> Quotes => Set<Quote>();
     public DbSet<QuoteItem> QuoteItems => Set<QuoteItem>();
+    public DbSet<Contract> Contracts => Set<Contract>();
+    public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<InvoiceItem> InvoiceItems => Set<InvoiceItem>();
+    public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<ProjectDocument> ProjectDocuments => Set<ProjectDocument>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<SocietySettings> SocietySettings => Set<SocietySettings>();
     public DbSet<WhatsAppRecommendation> WhatsAppRecommendations => Set<WhatsAppRecommendation>();
@@ -92,10 +98,38 @@ public sealed class AppDbContext : DbContext
         {
             b.ToTable("Projects");
             b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Projects_SocietyId");
+            b.HasIndex(x => new { x.SocietyId, x.LeadId })
+                .IsUnique()
+                .HasDatabaseName("IX_Projects_SocietyId_LeadId")
+                .HasFilter("\"LeadId\" IS NOT NULL");
             b.Property(x => x.ProgressPercent).HasDefaultValue(0);
             b.Property(x => x.Status).HasConversion<string>();
+            b.Property(x => x.Priority).HasConversion<int>();
+            b.Property(x => x.Reference).HasMaxLength(64);
+            b.Property(x => x.Notes).HasMaxLength(4000);
+            b.Property(x => x.RoofType).HasMaxLength(120);
+            b.Property(x => x.InstallationType).HasMaxLength(120);
+            b.Property(x => x.SystemSizeKw).HasPrecision(18, 3);
+            b.Property(x => x.EstimatedProduction).HasPrecision(18, 3);
+            b.Property(x => x.TotalHt).HasPrecision(18, 3);
+            b.Property(x => x.TotalTva).HasPrecision(18, 3);
+            b.Property(x => x.TotalTtc).HasPrecision(18, 3);
+            b.Property(x => x.EstimatedMargin).HasPrecision(18, 3);
             b.HasOne(x => x.Client).WithMany(x => x.Projects).HasForeignKey(x => x.ClientId);
             b.HasOne(x => x.Deal).WithMany(x => x.Projects).HasForeignKey(x => x.DealId);
+            b.HasOne(x => x.Lead).WithMany().HasForeignKey(x => x.LeadId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.Quote).WithMany().HasForeignKey(x => x.QuoteId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ProjectTimelineEvent>(b =>
+        {
+            b.ToTable("ProjectTimelineEvents");
+            b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_ProjectTimelineEvents_SocietyId");
+            b.HasIndex(x => x.ProjectId).HasDatabaseName("IX_ProjectTimelineEvents_ProjectId");
+            b.Property(x => x.Type).HasConversion<int>();
+            b.Property(x => x.Description).HasMaxLength(2000);
+            b.HasOne(x => x.Project).WithMany(x => x.TimelineEvents).HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<ProjectStage>(b =>
@@ -119,6 +153,8 @@ public sealed class AppDbContext : DbContext
             b.ToTable("Tasks");
             b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Tasks_SocietyId");
             b.Property(x => x.Status).HasConversion<string>();
+            b.Property(x => x.Priority).HasConversion<int>();
+            b.Property(x => x.Description).HasMaxLength(2000);
             b.HasOne(x => x.Project).WithMany(x => x.Tasks).HasForeignKey(x => x.ProjectId);
         });
 
@@ -215,6 +251,86 @@ public sealed class AppDbContext : DbContext
             b.HasOne(x => x.Quote).WithMany(x => x.Items).HasForeignKey(x => x.QuoteId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<Contract>(b =>
+        {
+            b.ToTable("Contracts");
+            b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Contracts_SocietyId");
+            b.HasIndex(x => x.ProjectId).HasDatabaseName("IX_Contracts_ProjectId");
+            b.Property(x => x.Reference).HasMaxLength(64);
+            b.Property(x => x.Notes).HasMaxLength(4000);
+            b.Property(x => x.PdfUrl).HasMaxLength(1000);
+            b.Property(x => x.Type).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.Status).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.TotalAmount).HasPrecision(18, 3);
+            b.HasOne(x => x.Project).WithMany(x => x.Contracts).HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Invoice>(b =>
+        {
+            b.ToTable("Invoices");
+            b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Invoices_SocietyId");
+            b.HasIndex(x => x.ProjectId).HasDatabaseName("IX_Invoices_ProjectId");
+            b.HasIndex(x => new { x.SocietyId, x.Reference }).IsUnique()
+                .HasDatabaseName("IX_Invoices_SocietyId_Reference");
+            b.Property(x => x.Reference).HasMaxLength(64);
+            b.Property(x => x.Notes).HasMaxLength(4000);
+            b.Property(x => x.PdfUrl).HasMaxLength(1000);
+            b.Property(x => x.Status).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.TotalHt).HasPrecision(18, 3);
+            b.Property(x => x.TotalTva).HasPrecision(18, 3);
+            b.Property(x => x.TotalTtc).HasPrecision(18, 3);
+            b.Property(x => x.PaidAmount).HasPrecision(18, 3);
+            b.Ignore(x => x.RemainingAmount);
+            b.HasOne(x => x.Project).WithMany(x => x.Invoices).HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<InvoiceItem>(b =>
+        {
+            b.ToTable("InvoiceItems");
+            b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_InvoiceItems_SocietyId");
+            b.HasIndex(x => x.InvoiceId).HasDatabaseName("IX_InvoiceItems_InvoiceId");
+            b.Property(x => x.Description).HasMaxLength(500);
+            b.Property(x => x.Quantity).HasPrecision(18, 2);
+            b.Property(x => x.UnitPrice).HasPrecision(18, 3);
+            b.Property(x => x.TvaRate).HasPrecision(5, 2);
+            b.Property(x => x.TotalHt).HasPrecision(18, 3);
+            b.HasOne(x => x.Invoice).WithMany(x => x.Items).HasForeignKey(x => x.InvoiceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.Item).WithMany().HasForeignKey(x => x.ItemId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<Payment>(b =>
+        {
+            b.ToTable("Payments");
+            b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_Payments_SocietyId");
+            b.HasIndex(x => x.InvoiceId).HasDatabaseName("IX_Payments_InvoiceId");
+            b.Property(x => x.Amount).HasPrecision(18, 3);
+            b.Property(x => x.Method).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.Reference).HasMaxLength(100);
+            b.Property(x => x.Notes).HasMaxLength(1000);
+            b.HasOne(x => x.Invoice).WithMany(x => x.Payments).HasForeignKey(x => x.InvoiceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectDocument>(b =>
+        {
+            b.ToTable("ProjectDocuments");
+            b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_ProjectDocuments_SocietyId");
+            b.HasIndex(x => x.ProjectId).HasDatabaseName("IX_ProjectDocuments_ProjectId");
+            b.Property(x => x.Name).HasMaxLength(300);
+            b.Property(x => x.Url).HasMaxLength(1000);
+            b.Property(x => x.Type).HasConversion<string>().HasMaxLength(40);
+            b.HasOne(x => x.Project).WithMany(x => x.ProjectDocuments).HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<Notification>(b =>
         {
             b.ToTable("Notifications");
@@ -248,6 +364,7 @@ public sealed class AppDbContext : DbContext
         modelBuilder.Entity<Deal>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<PipelineStage>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<Project>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<ProjectTimelineEvent>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<ProjectStage>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<ProjectStageTracking>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<CrmTask>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
@@ -259,6 +376,11 @@ public sealed class AppDbContext : DbContext
         modelBuilder.Entity<Item>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<Quote>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<QuoteItem>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<Contract>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<Invoice>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<InvoiceItem>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<Payment>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<ProjectDocument>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<Notification>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<SocietySettings>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<WhatsAppRecommendation>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));

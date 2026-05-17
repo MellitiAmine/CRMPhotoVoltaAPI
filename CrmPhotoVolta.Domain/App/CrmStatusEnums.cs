@@ -34,11 +34,83 @@ public enum ProjectStageTrackingStatus
     Done
 }
 
-/// <summary>Overall project lifecycle.</summary>
+/// <summary>Commercial contract types.</summary>
+public enum ContractType
+{
+    Installation,
+    Maintenance,
+    Warranty,
+    Financing,
+    Other
+}
+
+/// <summary>Commercial contract lifecycle.</summary>
+public enum ContractStatus
+{
+    Draft,
+    SentToClient,
+    Signed,
+    Cancelled
+}
+
+/// <summary>Invoice lifecycle.</summary>
+public enum InvoiceStatus
+{
+    Draft,
+    Sent,
+    PartiallyPaid,
+    Paid,
+    Overdue,
+    Cancelled
+}
+
+/// <summary>Payment methods.</summary>
+public enum PaymentMethod
+{
+    BankTransfer,
+    Cash,
+    Cheque,
+    CreditCard,
+    Other
+}
+
+/// <summary>Project document categories.</summary>
+public enum ProjectDocumentType
+{
+    Quote,
+    Contract,
+    Invoice,
+    TechnicalStudy,
+    STEG,
+    InstallationPhoto,
+    ClientDocument,
+    SAV,
+    Other
+}
+
+/// <summary>Photovoltaic project lifecycle (persisted as string in DB).</summary>
 public enum ProjectStatus
 {
-    Planned,
-    InProgress,
-    Done,
-    Cancelled
+    New,
+    Study,
+    TechnicalVisit,
+    QuoteSent,
+    Negotiation,
+    Approved,
+    Planning,
+    Installation,
+    WaitingSteg,
+    Activated,
+    Completed,
+    Sav,
+    Cancelled,
+
+    /// <summary>Legacy value — migrate to <see cref="New"/>.</summary>
+    Planned = New,
+
+    /// <summary>Legacy value — migrate to <see cref="Installation"/>.</summary>
+    InProgress = Installation,
+
+    /// <summary>Legacy value — migrate to <see cref="Completed"/>.</summary>
+    Done = Completed
 }
