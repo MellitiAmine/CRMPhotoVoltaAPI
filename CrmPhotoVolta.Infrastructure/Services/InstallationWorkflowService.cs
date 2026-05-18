@@ -2,6 +2,7 @@ using CrmPhotoVolta.Application.Common;
 using CrmPhotoVolta.Application.Crm.Installations;
 using CrmPhotoVolta.Application.Crm.Projects;
 using CrmPhotoVolta.Application.Exceptions;
+using CrmPhotoVolta.Application.Storage;
 using CrmPhotoVolta.Domain.App;
 using CrmPhotoVolta.Infrastructure.Data.App;
 using CrmPhotoVolta.Infrastructure.Data.Core;
@@ -23,11 +24,13 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
 
     private readonly AppDbContext _app;
     private readonly CoreDbContext _core;
+    private readonly IFileStorageService _files;
 
-    public InstallationWorkflowService(AppDbContext app, CoreDbContext core)
+    public InstallationWorkflowService(AppDbContext app, CoreDbContext core, IFileStorageService files)
     {
         _app = app;
         _core = core;
+        _files = files;
     }
 
     public async Task<(IReadOnlyList<InstallationListItemDto> Items, PaginationMeta Meta)> ListPagedAsync(
@@ -232,6 +235,47 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
         return await GetAsync(societyId, installationId, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<InstallationChecklistItemDto>> ListChecklistAsync(
+        Guid societyId,
+        Guid installationId,
+        CancellationToken cancellationToken = default)
+    {
+        _ = await LoadInstallationAsync(societyId, installationId, cancellationToken);
+        return await QueryChecklistDtosAsync(societyId, installationId, cancellationToken);
+    }
+
+    public async Task<InstallationChecklistItemDto> CreateChecklistItemAsync(
+        Guid societyId,
+        Guid installationId,
+        CreateInstallationChecklistItemRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.Item))
+            throw new AppException("VALIDATION_ERROR", "Item label is required.", 400);
+
+        _ = await LoadInstallationTrackedAsync(societyId, installationId, cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        var row = new InstallationChecklistItem
+        {
+            SocietyId       = societyId,
+            InstallationId  = installationId,
+            Item            = request.Item.Trim(),
+            IsCompleted     = false,
+            CreatedAt       = now
+        };
+
+        _app.InstallationChecklistItems.Add(row);
+        await _app.SaveChangesAsync(cancellationToken);
+
+        return new InstallationChecklistItemDto
+        {
+            Id          = row.Id,
+            Item        = row.Item,
+            IsCompleted = row.IsCompleted
+        };
+    }
+
     public async Task<IReadOnlyList<InstallationChecklistItemDto>> UpdateChecklistAsync(
         Guid societyId,
         Guid installationId,
@@ -248,49 +292,189 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
                 continue;
 
             row.IsCompleted = u.IsCompleted;
+            if (u.Item is { } label && !string.IsNullOrWhiteSpace(label))
+                row.Item = label.Trim();
             row.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
         await _app.SaveChangesAsync(cancellationToken);
-
-        return await _app.InstallationChecklistItems.AsNoTracking()
-            .Where(x => x.InstallationId == installationId && x.SocietyId == societyId)
-            .OrderBy(x => x.Item)
-            .Select(x => new InstallationChecklistItemDto { Id = x.Id, Item = x.Item, IsCompleted = x.IsCompleted })
-            .ToListAsync(cancellationToken);
+        return await QueryChecklistDtosAsync(societyId, installationId, cancellationToken);
     }
 
-    public async Task<InstallationPhotoDto> AddPhotoAsync(
+    public async Task<InstallationChecklistItemDto> UpdateChecklistItemAsync(
         Guid societyId,
         Guid installationId,
-        AddInstallationPhotoRequest request,
+        Guid itemId,
+        UpdateInstallationChecklistItemRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.Url))
-            throw new AppException("VALIDATION_ERROR", "Url is required.", 400);
+        _ = await LoadInstallationTrackedAsync(societyId, installationId, cancellationToken);
 
+        var row = await _app.InstallationChecklistItems
+            .FirstOrDefaultAsync(x => x.Id == itemId && x.InstallationId == installationId && x.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("CHECKLIST_ITEM_NOT_FOUND", "Checklist item not found.", 404);
+
+        if (request.Item is { } label)
+        {
+            if (string.IsNullOrWhiteSpace(label))
+                throw new AppException("VALIDATION_ERROR", "Item label cannot be empty.", 400);
+            row.Item = label.Trim();
+        }
+
+        if (request.IsCompleted is { } completed)
+            row.IsCompleted = completed;
+
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        await _app.SaveChangesAsync(cancellationToken);
+
+        return new InstallationChecklistItemDto
+        {
+            Id          = row.Id,
+            Item        = row.Item,
+            IsCompleted = row.IsCompleted
+        };
+    }
+
+    public async Task DeleteChecklistItemAsync(
+        Guid societyId,
+        Guid installationId,
+        Guid itemId,
+        CancellationToken cancellationToken = default)
+    {
+        _ = await LoadInstallationTrackedAsync(societyId, installationId, cancellationToken);
+
+        var row = await _app.InstallationChecklistItems
+            .FirstOrDefaultAsync(x => x.Id == itemId && x.InstallationId == installationId && x.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("CHECKLIST_ITEM_NOT_FOUND", "Checklist item not found.", 404);
+
+        row.IsDeleted = true;
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        await _app.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<InstallationChecklistItemDto>> InitializeChecklistAsync(
+        Guid societyId,
+        Guid installationId,
+        InitializeInstallationChecklistRequest? request = null,
+        CancellationToken cancellationToken = default)
+    {
         var inst = await LoadInstallationTrackedAsync(societyId, installationId, cancellationToken);
+
+        var existingCount = await _app.InstallationChecklistItems
+            .CountAsync(x => x.InstallationId == installationId && x.SocietyId == societyId, cancellationToken);
+
+        if (existingCount > 0)
+            return await QueryChecklistDtosAsync(societyId, installationId, cancellationToken);
+
+        var labels = request?.Items is { Count: > 0 } custom
+            ? custom.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToList()
+            : DefaultChecklist.ToList();
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var label in labels)
+        {
+            inst.Checklist.Add(new InstallationChecklistItem
+            {
+                SocietyId      = societyId,
+                Item           = label,
+                IsCompleted    = false,
+                CreatedAt      = now
+            });
+        }
+
+        await _app.SaveChangesAsync(cancellationToken);
+        return await QueryChecklistDtosAsync(societyId, installationId, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<InstallationChecklistItemDto>> QueryChecklistDtosAsync(
+        Guid societyId,
+        Guid installationId,
+        CancellationToken cancellationToken) =>
+        await _app.InstallationChecklistItems.AsNoTracking()
+            .Where(x => x.InstallationId == installationId && x.SocietyId == societyId)
+            .OrderBy(x => x.CreatedAt)
+            .ThenBy(x => x.Item)
+            .Select(x => new InstallationChecklistItemDto { Id = x.Id, Item = x.Item, IsCompleted = x.IsCompleted })
+            .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<InstallationPhotoDto>> ListPhotosAsync(
+        Guid societyId,
+        Guid installationId,
+        CancellationToken cancellationToken = default)
+    {
+        _ = await LoadInstallationAsync(societyId, installationId, cancellationToken);
+        var rows = await _app.InstallationPhotos.AsNoTracking()
+            .Where(p => p.InstallationId == installationId && p.SocietyId == societyId)
+            .OrderByDescending(p => p.UploadedAt)
+            .ToListAsync(cancellationToken);
+        return rows.Select(p => MapPhotoDto(p)).ToList();
+    }
+
+    public async Task<InstallationPhotoDto> UploadPhotoAsync(
+        Guid societyId,
+        Guid installationId,
+        string fileName,
+        string contentType,
+        long length,
+        Stream content,
+        CancellationToken cancellationToken = default)
+    {
+        _ = await LoadInstallationTrackedAsync(societyId, installationId, cancellationToken);
+
+        var stored = await _files.SaveAsync(new FileUploadInput
+        {
+            SocietyId        = societyId,
+            RelativeFolder     = $"installations/{installationId:N}/photos",
+            OriginalFileName   = fileName,
+            ContentType        = contentType,
+            Length             = length,
+            Content            = content,
+            ImagesOnly         = true
+        }, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var photo = new InstallationPhoto
         {
-            SocietyId = societyId,
-            InstallationId = installationId,
-            Url = request.Url.Trim(),
-            UploadedAt = now,
-            CreatedAt = now
+            SocietyId       = societyId,
+            InstallationId  = installationId,
+            Url             = stored.PublicPath,
+            UploadedAt      = now,
+            CreatedAt       = now
         };
 
         _app.InstallationPhotos.Add(photo);
         await _app.SaveChangesAsync(cancellationToken);
 
-        return new InstallationPhotoDto
-        {
-            Id = photo.Id,
-            Url = photo.Url,
-            UploadedAt = photo.UploadedAt
-        };
+        return MapPhotoDto(photo, stored);
     }
+
+    public async Task DeletePhotoAsync(
+        Guid societyId,
+        Guid installationId,
+        Guid photoId,
+        CancellationToken cancellationToken = default)
+    {
+        _ = await LoadInstallationTrackedAsync(societyId, installationId, cancellationToken);
+
+        var photo = await _app.InstallationPhotos
+            .FirstOrDefaultAsync(p => p.Id == photoId && p.InstallationId == installationId && p.SocietyId == societyId, cancellationToken)
+            ?? throw new AppException("PHOTO_NOT_FOUND", "Installation photo not found.", 404);
+
+        await _files.DeleteByPublicPathAsync(photo.Url, cancellationToken);
+        photo.IsDeleted = true;
+        photo.UpdatedAt = DateTimeOffset.UtcNow;
+        await _app.SaveChangesAsync(cancellationToken);
+    }
+
+    private InstallationPhotoDto MapPhotoDto(InstallationPhoto p, StoredFileResult? stored = null) => new()
+    {
+        Id          = p.Id,
+        Url         = _files.ToAbsoluteUrl(p.Url),
+        FileName    = stored?.StoredFileName ?? Path.GetFileName(p.Url),
+        ContentType = stored?.ContentType ?? "application/octet-stream",
+        SizeBytes   = stored?.SizeBytes ?? 0,
+        UploadedAt  = p.UploadedAt
+    };
 
     private async Task EnsureProjectAsync(Guid societyId, Guid projectId, CancellationToken cancellationToken)
     {
@@ -341,12 +525,13 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
             Date = x.Date,
             Status = x.Status,
             Checklist = x.Checklist
-                .OrderBy(c => c.Item)
+                .OrderBy(c => c.CreatedAt)
+                .ThenBy(c => c.Item)
                 .Select(c => new InstallationChecklistItemDto { Id = c.Id, Item = c.Item, IsCompleted = c.IsCompleted })
                 .ToList(),
             Photos = x.Photos
                 .OrderByDescending(p => p.UploadedAt)
-                .Select(p => new InstallationPhotoDto { Id = p.Id, Url = p.Url, UploadedAt = p.UploadedAt })
+                .Select(p => MapPhotoDto(p))
                 .ToList(),
             CreatedAt = x.CreatedAt,
             UpdatedAt = x.UpdatedAt

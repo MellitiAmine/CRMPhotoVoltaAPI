@@ -44,6 +44,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<SocietySettings> SocietySettings => Set<SocietySettings>();
     public DbSet<WhatsAppRecommendation> WhatsAppRecommendations => Set<WhatsAppRecommendation>();
     public DbSet<CommercialProfile> CommercialProfiles => Set<CommercialProfile>();
+    public DbSet<TechnicienProfile> TechnicienProfiles => Set<TechnicienProfile>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -398,6 +399,30 @@ public sealed class AppDbContext : DbContext
             b.Property(x => x.KpiRevenueGenerated).HasPrecision(18, 2);
         });
 
+        modelBuilder.Entity<TechnicienProfile>(b =>
+        {
+            b.ToTable("TechnicienProfiles");
+            b.HasIndex(x => x.SocietyId).HasDatabaseName("IX_TechnicienProfiles_SocietyId");
+            b.HasIndex(x => new { x.SocietyId, x.UserId }).IsUnique()
+              .HasDatabaseName("IX_TechnicienProfiles_SocietyId_UserId");
+            b.HasIndex(x => new { x.SocietyId, x.EmployeeId }).IsUnique()
+              .HasDatabaseName("IX_TechnicienProfiles_SocietyId_EmployeeId");
+            b.Property(x => x.FirstName).HasMaxLength(100);
+            b.Property(x => x.LastName).HasMaxLength(100);
+            b.Property(x => x.Email).HasMaxLength(200);
+            b.Property(x => x.Phone).HasMaxLength(30);
+            b.Property(x => x.EmployeeId).HasMaxLength(50);
+            b.Property(x => x.Department).HasMaxLength(120);
+            b.Property(x => x.Position).HasMaxLength(120);
+            b.Property(x => x.ContractType).HasMaxLength(30);
+            b.Property(x => x.WorkTime).HasMaxLength(20);
+            b.Property(x => x.Status).HasMaxLength(20);
+            b.Property(x => x.StartDate).HasMaxLength(10);
+            b.Property(x => x.ScoreTier).HasMaxLength(20);
+            b.Property(x => x.ScoreTrend).HasMaxLength(10);
+            b.Property(x => x.Salary).HasPrecision(18, 2);
+        });
+
         modelBuilder.Entity<Lead>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<LeadActivity>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<LeadJournalEntry>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
@@ -426,5 +451,6 @@ public sealed class AppDbContext : DbContext
         modelBuilder.Entity<SocietySettings>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<WhatsAppRecommendation>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<CommercialProfile>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<TechnicienProfile>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
     }
 }

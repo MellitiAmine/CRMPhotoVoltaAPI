@@ -150,7 +150,6 @@ public sealed class InvoiceService : IInvoiceService
         AddPaymentRequest request, CancellationToken cancellationToken = default)
     {
         var invoice = await _app.Invoices
-            .Include(i => i.Payments)
             .FirstOrDefaultAsync(i => i.Id == invoiceId && i.SocietyId == societyId, cancellationToken)
             ?? throw new AppException("INVOICE_NOT_FOUND", "Invoice not found.", 404);
 
@@ -158,36 +157,56 @@ public sealed class InvoiceService : IInvoiceService
             throw new AppException("VALIDATION_ERROR", "Payment amount must be positive.", 400);
 
         var now = DateTimeOffset.UtcNow;
-        invoice.Payments.Add(new Payment
-        {
-            SocietyId = societyId,
-            Amount = request.Amount,
-            PaidOn = request.PaidOn,
-            Method = request.Method,
-            Reference = request.Reference?.Trim(),
-            Notes = request.Notes?.Trim(),
-            CreatedAt = now,
-            CreatedById = actorUserId
-        });
 
-        invoice.PaidAmount = invoice.Payments.Sum(p => p.Amount);
+        var paidBefore = await _app.Payments
+            .Where(p => p.InvoiceId == invoiceId && p.SocietyId == societyId)
+            .SumAsync(p => p.Amount, cancellationToken);
+
+        var payment = new Payment
+        {
+            SocietyId    = societyId,
+            InvoiceId    = invoiceId,
+            Amount       = request.Amount,
+            PaidOn       = request.PaidOn,
+            Method       = request.Method,
+            Reference    = request.Reference?.Trim(),
+            Notes        = request.Notes?.Trim(),
+            CreatedAt    = now,
+            CreatedById  = actorUserId,
+            IsDeleted    = false
+        };
+        _app.Payments.Add(payment);
+
+        invoice.PaidAmount = paidBefore + request.Amount;
         invoice.Status = invoice.PaidAmount >= invoice.TotalTtc
             ? InvoiceStatus.Paid
-            : InvoiceStatus.PartiallyPaid;
+            : invoice.PaidAmount > 0
+                ? InvoiceStatus.PartiallyPaid
+                : invoice.Status;
         invoice.UpdatedAt = now;
 
-        // Add payment timeline event on invoice's project
         _app.ProjectTimelineEvents.Add(new ProjectTimelineEvent
         {
-            SocietyId = societyId,
-            ProjectId = invoice.ProjectId,
-            Type = ProjectTimelineEventType.PaymentReceived,
-            Description = $"Paiement de {request.Amount:N3} TND reçu (facture {invoice.Reference}).",
+            SocietyId       = societyId,
+            ProjectId       = invoice.ProjectId,
+            Type            = ProjectTimelineEventType.PaymentReceived,
+            Description     = $"Paiement de {request.Amount:N3} TND reçu (facture {invoice.Reference}).",
             CreatedByUserId = actorUserId,
-            CreatedAt = now
+            CreatedAt       = now,
+            IsDeleted       = false
         });
 
-        await _app.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _app.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new AppException(
+                "CONCURRENCY_CONFLICT",
+                "The invoice could not be updated. Refresh the invoice and try again.",
+                409);
+        }
 
         // If fully paid, notify commercial
         if (invoice.Status == InvoiceStatus.Paid)

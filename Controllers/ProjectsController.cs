@@ -7,6 +7,7 @@ using CrmPhotoVolta.Application.Crm.Installations;
 using CrmPhotoVolta.Application.Crm.Invoices;
 using CrmPhotoVolta.Application.Crm.Projects;
 using CrmPhotoVolta.Application.Exceptions;
+using CrmPhotoVolta.Domain.App;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -180,12 +181,40 @@ public sealed class ProjectsController : TenantCrmControllerBase
     }
 
     [HttpPost("{id:guid}/documents")]
+    [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status201Created)]
-    public async Task<IActionResult> UploadDocument(Guid id, [FromBody] UploadProjectDocumentRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> UploadDocument(
+        Guid id,
+        [FromForm] ProjectDocumentType type,
+        [FromForm] string? name,
+        IFormFile file,
+        CancellationToken cancellationToken)
     {
+        if (file.Length == 0)
+            return UnprocessableEntity(ApiResponse.Fail("VALIDATION_ERROR", "File is required.", null));
+
         var actorId = _currentUser.UserId ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
-        var doc = await _documents.AddAsync(RequireSociety(), id, actorId, request, cancellationToken);
+        await using var stream = file.OpenReadStream();
+        var doc = await _documents.UploadAsync(
+            RequireSociety(),
+            id,
+            actorId,
+            type,
+            name,
+            file.FileName,
+            file.ContentType,
+            file.Length,
+            stream,
+            cancellationToken);
+
         return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(doc));
+    }
+
+    [HttpDelete("{id:guid}/documents/{documentId:guid}")]
+    public async Task<IActionResult> DeleteDocument(Guid id, Guid documentId, CancellationToken cancellationToken)
+    {
+        await _documents.DeleteAsync(RequireSociety(), id, documentId, cancellationToken);
+        return Ok(ApiResponse.Ok(new { deleted = true }));
     }
 
     // ── Invoices (by project) ─────────────────────────────────────────────────

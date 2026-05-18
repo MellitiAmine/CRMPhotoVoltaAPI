@@ -15,6 +15,12 @@ public static class EfExceptionTranslator
             if (ex is PostgresException pg)
                 return MapPostgres(pg);
 
+            if (ex is DbUpdateConcurrencyException)
+                return new AppException(
+                    "CONCURRENCY_CONFLICT",
+                    "The record was modified or deleted by another process. Refresh and try again.",
+                    409);
+
             if (ex is DbUpdateException db && db.InnerException is not null)
             {
                 ex = db.InnerException;

@@ -15,6 +15,7 @@ using CrmPhotoVolta.Application.Crm.Notifications;
 using CrmPhotoVolta.Application.Crm.Pipeline;
 using CrmPhotoVolta.Application.Crm.Projects;
 using CrmPhotoVolta.Application.Crm.Commercials;
+using CrmPhotoVolta.Application.Crm.Techniciens;
 using CrmPhotoVolta.Application.Crm.Items;
 using CrmPhotoVolta.Application.Crm.Quotes;
 using CrmPhotoVolta.Application.Crm.Reports;
@@ -38,6 +39,7 @@ using CrmPhotoVolta.Infrastructure.Data.Platform;
 using CrmPhotoVolta.Infrastructure.Identity;
 using CrmPhotoVolta.Infrastructure.Services;
 using CrmPhotoVolta.Infrastructure.Seeding;
+using CrmPhotoVolta.Infrastructure.Storage;
 using CrmPhotoVolta.Infrastructure.Tenancy;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -74,6 +76,7 @@ public static class DependencyInjection
 
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
         services.Configure<PlatformJwtOptions>(configuration.GetSection(PlatformJwtOptions.SectionName));
+        services.AddFileStorage(configuration);
         services.Configure<PlatformSeedOptions>(configuration.GetSection(PlatformSeedOptions.SectionName));
         services.AddSingleton<IJwtTokenService, JwtTokenService>();
         services.AddSingleton<IPlatformJwtTokenService, PlatformJwtTokenService>();
@@ -95,6 +98,7 @@ public static class DependencyInjection
         services.AddScoped<ITenantProvisioningService, TenantProvisioningService>();
 
         services.AddScoped<ICommercialService, CommercialService>();
+        services.AddScoped<ITechnicienService, TechnicienService>();
         services.AddScoped<ILeadJournalService, LeadJournalService>();
         services.AddScoped<ILeadService, LeadService>();
         services.AddScoped<ILeadWonOrchestrationService, LeadWonOrchestrationService>();
@@ -180,7 +184,7 @@ public static class DependencyInjection
             options.AddPolicy(SocietyPolicies.Technician, policy =>
             {
                 policy.RequireAuthenticatedUser();
-                policy.Requirements.Add(new SocietyRoleRequirement("Admin", "Technician"));
+                policy.Requirements.Add(new SocietyRoleRequirement("Admin", "Technicien", "Technician"));
             });
         });
         services.AddScoped<IAuthorizationHandler, SocietyRoleHandler>();

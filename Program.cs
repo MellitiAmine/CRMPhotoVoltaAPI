@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CrmPhotoVolta.Application;
 using CrmPhotoVolta.Application.Common;
+using CrmPhotoVolta.Application.Storage;
 using CrmPhotoVolta.Infrastructure;
 using CrmPhotoVolta.Infrastructure.Data.App;
 using CrmPhotoVolta.Infrastructure.Data.Core;
@@ -211,12 +212,15 @@ if (Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") != "true")
     app.UseHttpsRedirection();
 // }
 
-var uploadsRoot = Path.Combine(builder.Environment.ContentRootPath, "uploads");
-Directory.CreateDirectory(uploadsRoot);
+var fileStorage = app.Configuration.GetSection(FileStorageOptions.SectionName).Get<FileStorageOptions>()
+    ?? new FileStorageOptions();
+var webRootPath = Path.Combine(app.Environment.ContentRootPath, fileStorage.WebRootPath);
+var filesRoot = Path.Combine(webRootPath, "files");
+Directory.CreateDirectory(filesRoot);
 app.UseStaticFiles(new StaticFileOptions
 {
-    FileProvider = new PhysicalFileProvider(uploadsRoot),
-    RequestPath = "/uploads"
+    FileProvider = new PhysicalFileProvider(filesRoot),
+    RequestPath = fileStorage.PublicPathPrefix.TrimEnd('/')
 });
 
 app.UseCors();
