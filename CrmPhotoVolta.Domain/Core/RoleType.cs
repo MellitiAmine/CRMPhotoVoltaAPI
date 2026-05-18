@@ -6,5 +6,6 @@ public enum RoleType
     Unknown = 0,
     Admin = 1,
     Manager = 2,
-    Commercial = 3
+    Commercial = 3,
+    Technicien = 4
 }

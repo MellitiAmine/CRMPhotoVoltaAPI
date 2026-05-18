@@ -68,6 +68,38 @@ public sealed class InstallationsController : TenantCrmControllerBase
         return Ok(ApiResponse.Ok(updated));
     }
 
+    /// <summary>Returns all checklist items for an installation (creation order).</summary>
+    [HttpGet("{id:guid}/checklist")]
+    public async Task<IActionResult> ListChecklist(Guid id, CancellationToken cancellationToken)
+    {
+        var list = await _installations.ListChecklistAsync(RequireSociety(), id, cancellationToken);
+        return Ok(ApiResponse.Ok(list));
+    }
+
+    /// <summary>Adds a single checklist item.</summary>
+    [HttpPost("{id:guid}/checklist")]
+    [ProducesResponseType(StatusCodes.Status201Created)]
+    public async Task<IActionResult> CreateChecklistItem(
+        Guid id,
+        [FromBody] CreateInstallationChecklistItemRequest request,
+        CancellationToken cancellationToken)
+    {
+        var created = await _installations.CreateChecklistItemAsync(RequireSociety(), id, request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(created));
+    }
+
+    /// <summary>Seeds the default checklist when the installation has no items yet.</summary>
+    [HttpPost("{id:guid}/checklist/initialize")]
+    public async Task<IActionResult> InitializeChecklist(
+        Guid id,
+        [FromBody] InitializeInstallationChecklistRequest? request,
+        CancellationToken cancellationToken)
+    {
+        var list = await _installations.InitializeChecklistAsync(RequireSociety(), id, request, cancellationToken);
+        return Ok(ApiResponse.Ok(list));
+    }
+
+    /// <summary>Bulk-updates completion status (and optionally labels) for multiple items.</summary>
     [HttpPut("{id:guid}/checklist")]
     public async Task<IActionResult> UpdateChecklist(Guid id, [FromBody] UpdateInstallationChecklistRequest request, CancellationToken cancellationToken)
     {
@@ -75,11 +107,58 @@ public sealed class InstallationsController : TenantCrmControllerBase
         return Ok(ApiResponse.Ok(list));
     }
 
-    [HttpPost("{id:guid}/photos")]
-    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status201Created)]
-    public async Task<IActionResult> AddPhoto(Guid id, [FromBody] AddInstallationPhotoRequest request, CancellationToken cancellationToken)
+    /// <summary>Updates a single checklist item (label and/or completed flag).</summary>
+    [HttpPut("{id:guid}/checklist/{itemId:guid}")]
+    public async Task<IActionResult> UpdateChecklistItem(
+        Guid id,
+        Guid itemId,
+        [FromBody] UpdateInstallationChecklistItemRequest request,
+        CancellationToken cancellationToken)
     {
-        var created = await _installations.AddPhotoAsync(RequireSociety(), id, request, cancellationToken);
+        var updated = await _installations.UpdateChecklistItemAsync(RequireSociety(), id, itemId, request, cancellationToken);
+        return Ok(ApiResponse.Ok(updated));
+    }
+
+    /// <summary>Soft-deletes a checklist item.</summary>
+    [HttpDelete("{id:guid}/checklist/{itemId:guid}")]
+    public async Task<IActionResult> DeleteChecklistItem(Guid id, Guid itemId, CancellationToken cancellationToken)
+    {
+        await _installations.DeleteChecklistItemAsync(RequireSociety(), id, itemId, cancellationToken);
+        return Ok(ApiResponse.Ok(new { deleted = true }));
+    }
+
+    [HttpGet("{id:guid}/photos")]
+    public async Task<IActionResult> ListPhotos(Guid id, CancellationToken cancellationToken)
+    {
+        var list = await _installations.ListPhotosAsync(RequireSociety(), id, cancellationToken);
+        return Ok(ApiResponse.Ok(list));
+    }
+
+    [HttpPost("{id:guid}/photos")]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(StatusCodes.Status201Created)]
+    public async Task<IActionResult> UploadPhoto(Guid id, IFormFile file, CancellationToken cancellationToken)
+    {
+        if (file.Length == 0)
+            return UnprocessableEntity(ApiResponse.Fail("VALIDATION_ERROR", "File is required.", null));
+
+        await using var stream = file.OpenReadStream();
+        var created = await _installations.UploadPhotoAsync(
+            RequireSociety(),
+            id,
+            file.FileName,
+            file.ContentType,
+            file.Length,
+            stream,
+            cancellationToken);
+
         return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(created));
+    }
+
+    [HttpDelete("{id:guid}/photos/{photoId:guid}")]
+    public async Task<IActionResult> DeletePhoto(Guid id, Guid photoId, CancellationToken cancellationToken)
+    {
+        await _installations.DeletePhotoAsync(RequireSociety(), id, photoId, cancellationToken);
+        return Ok(ApiResponse.Ok(new { deleted = true }));
     }
 }

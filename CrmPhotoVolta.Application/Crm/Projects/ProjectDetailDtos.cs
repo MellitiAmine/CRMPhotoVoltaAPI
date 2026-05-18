@@ -71,6 +71,9 @@ public sealed class ProjectDocumentDto
     public ProjectDocumentType Type { get; init; }
     public string Name { get; init; } = string.Empty;
     public string Url { get; init; } = string.Empty;
+    public string FileName { get; init; } = string.Empty;
+    public string ContentType { get; init; } = string.Empty;
+    public long SizeBytes { get; init; }
     public Guid? UploadedByUserId { get; init; }
     public string? UploadedByName { get; init; }
     public DateTimeOffset UploadedAt { get; init; }

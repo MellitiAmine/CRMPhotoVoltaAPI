@@ -2,6 +2,7 @@ using CrmPhotoVolta.Application.Abstractions;
 using CrmPhotoVolta.Application.Auth;
 using CrmPhotoVolta.Application.Common;
 using CrmPhotoVolta.Application.Crm.Documents;
+using CrmPhotoVolta.Application.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -14,12 +15,12 @@ namespace CrmPhotoVoltaApis.Controllers;
 public sealed class DocumentsController : TenantCrmControllerBase
 {
     private readonly IDocumentService _documents;
-    private readonly IWebHostEnvironment _env;
+    private readonly IFileStorageService _files;
 
-    public DocumentsController(ITenantContext tenant, IDocumentService documents, IWebHostEnvironment env) : base(tenant)
+    public DocumentsController(ITenantContext tenant, IDocumentService documents, IFileStorageService files) : base(tenant)
     {
         _documents = documents;
-        _env = env;
+        _files = files;
     }
 
     [HttpPost("upload")]
@@ -36,18 +37,42 @@ public sealed class DocumentsController : TenantCrmControllerBase
             return UnprocessableEntity(ApiResponse.Fail("VALIDATION_ERROR", "File is required.", null));
 
         var societyId = RequireSociety();
-        var dir = Path.Combine(_env.ContentRootPath, "uploads", societyId.ToString("N"));
-        Directory.CreateDirectory(dir);
+        var folder = projectId is { } pid
+            ? $"documents/projects/{pid:N}"
+            : clientId is { } cid
+                ? $"documents/clients/{cid:N}"
+                : "documents/general";
 
-        var safeName = $"{Guid.NewGuid():N}_{Path.GetFileName(file.FileName)}";
-        var fullPath = Path.Combine(dir, safeName);
+        await using var stream = file.OpenReadStream();
+        var stored = await _files.SaveAsync(new FileUploadInput
+        {
+            SocietyId        = societyId,
+            RelativeFolder   = folder,
+            OriginalFileName = file.FileName,
+            ContentType      = file.ContentType,
+            Length           = file.Length,
+            Content          = stream,
+            ImagesOnly       = false
+        }, cancellationToken);
 
-        await using (var stream = System.IO.File.Create(fullPath))
-            await file.CopyToAsync(stream, cancellationToken);
+        var doc = await _documents.RegisterUploadAsync(
+            societyId,
+            projectId,
+            clientId,
+            type ?? "file",
+            stored.PublicPath,
+            cancellationToken);
 
-        var publicUrl = $"/uploads/{societyId:N}/{safeName}";
-        var doc = await _documents.RegisterUploadAsync(societyId, projectId, clientId, type ?? "file", publicUrl, cancellationToken);
-        return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(doc));
+        return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(new
+        {
+            doc.Id,
+            doc.Type,
+            Url = _files.ToAbsoluteUrl(stored.PublicPath),
+            stored.StoredFileName,
+            stored.ContentType,
+            stored.SizeBytes,
+            doc.UploadedAt
+        }));
     }
 
     [HttpGet("projects/{projectId:guid}")]

@@ -1,5 +1,6 @@
 using CrmPhotoVolta.Application.Crm.Documents;
 using CrmPhotoVolta.Application.Exceptions;
+using CrmPhotoVolta.Application.Storage;
 using CrmPhotoVolta.Domain.App;
 using CrmPhotoVolta.Infrastructure.Data.App;
 using Microsoft.EntityFrameworkCore;
@@ -9,10 +10,12 @@ namespace CrmPhotoVolta.Infrastructure.Services;
 public sealed class DocumentService : IDocumentService
 {
     private readonly AppDbContext _app;
+    private readonly IFileStorageService _files;
 
-    public DocumentService(AppDbContext app)
+    public DocumentService(AppDbContext app, IFileStorageService files)
     {
         _app = app;
+        _files = files;
     }
 
     public async Task<DocumentDto> RegisterUploadAsync(
@@ -48,15 +51,7 @@ public sealed class DocumentService : IDocumentService
         _app.Documents.Add(doc);
         await _app.SaveChangesAsync(cancellationToken);
 
-        return new DocumentDto
-        {
-            Id = doc.Id,
-            ProjectId = doc.ProjectId,
-            ClientId = doc.ClientId,
-            Type = doc.Type,
-            FileUrl = doc.FileUrl,
-            UploadedAt = doc.UploadedAt
-        };
+        return MapDto(doc);
     }
 
     public async Task<IReadOnlyList<DocumentDto>> ListByProjectAsync(Guid societyId, Guid projectId, CancellationToken cancellationToken = default)
@@ -64,19 +59,12 @@ public sealed class DocumentService : IDocumentService
         if (!await _app.Projects.AnyAsync(x => x.Id == projectId && x.SocietyId == societyId, cancellationToken))
             throw new AppException("PROJECT_NOT_FOUND", "Project not found.", 404);
 
-        return await _app.Documents.AsNoTracking()
+        var rows = await _app.Documents.AsNoTracking()
             .Where(x => x.SocietyId == societyId && x.ProjectId == projectId)
             .OrderByDescending(x => x.UploadedAt)
-            .Select(x => new DocumentDto
-            {
-                Id = x.Id,
-                ProjectId = x.ProjectId,
-                ClientId = x.ClientId,
-                Type = x.Type,
-                FileUrl = x.FileUrl,
-                UploadedAt = x.UploadedAt
-            })
             .ToListAsync(cancellationToken);
+
+        return rows.Select(MapDto).ToList();
     }
 
     public async Task<IReadOnlyList<DocumentDto>> ListByClientAsync(Guid societyId, Guid clientId, CancellationToken cancellationToken = default)
@@ -84,18 +72,21 @@ public sealed class DocumentService : IDocumentService
         if (!await _app.Clients.AnyAsync(x => x.Id == clientId && x.SocietyId == societyId, cancellationToken))
             throw new AppException("CLIENT_NOT_FOUND", "Client not found.", 404);
 
-        return await _app.Documents.AsNoTracking()
+        var rows = await _app.Documents.AsNoTracking()
             .Where(x => x.SocietyId == societyId && x.ClientId == clientId)
             .OrderByDescending(x => x.UploadedAt)
-            .Select(x => new DocumentDto
-            {
-                Id = x.Id,
-                ProjectId = x.ProjectId,
-                ClientId = x.ClientId,
-                Type = x.Type,
-                FileUrl = x.FileUrl,
-                UploadedAt = x.UploadedAt
-            })
             .ToListAsync(cancellationToken);
+
+        return rows.Select(MapDto).ToList();
     }
+
+    private DocumentDto MapDto(Document doc) => new()
+    {
+        Id         = doc.Id,
+        ProjectId  = doc.ProjectId,
+        ClientId   = doc.ClientId,
+        Type       = doc.Type,
+        FileUrl    = _files.ToAbsoluteUrl(doc.FileUrl),
+        UploadedAt = doc.UploadedAt
+    };
 }

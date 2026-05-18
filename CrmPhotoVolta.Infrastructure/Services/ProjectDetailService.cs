@@ -2,6 +2,7 @@ using CrmPhotoVolta.Application.Crm.Contracts;
 using CrmPhotoVolta.Application.Crm.Invoices;
 using CrmPhotoVolta.Application.Crm.Projects;
 using CrmPhotoVolta.Application.Exceptions;
+using CrmPhotoVolta.Application.Storage;
 using CrmPhotoVolta.Domain.App;
 using CrmPhotoVolta.Infrastructure.Data.App;
 using CrmPhotoVolta.Infrastructure.Data.Core;
@@ -13,11 +14,13 @@ public sealed class ProjectDetailService : IProjectDetailService
 {
     private readonly AppDbContext _app;
     private readonly CoreDbContext _core;
+    private readonly IFileStorageService _files;
 
-    public ProjectDetailService(AppDbContext app, CoreDbContext core)
+    public ProjectDetailService(AppDbContext app, CoreDbContext core, IFileStorageService files)
     {
         _app = app;
         _core = core;
+        _files = files;
     }
 
     public async Task<ProjectDetailDto> GetDetailAsync(
@@ -163,7 +166,8 @@ public sealed class ProjectDetailService : IProjectDetailService
                     Id = d.Id,
                     Type = d.Type,
                     Name = d.Name,
-                    Url = d.Url,
+                    Url = _files.ToAbsoluteUrl(d.Url),
+                    FileName = Path.GetFileName(d.Url),
                     UploadedByUserId = d.UploadedByUserId,
                     UploadedByName = UserName(d.UploadedByUserId),
                     UploadedAt = d.UploadedAt

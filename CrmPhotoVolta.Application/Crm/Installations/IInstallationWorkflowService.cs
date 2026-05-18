@@ -32,8 +32,38 @@ public interface IInstallationWorkflowService
 
     Task<InstallationDto> StartAsync(Guid societyId, Guid installationId, CancellationToken cancellationToken = default);
     Task<InstallationDto> CompleteAsync(Guid societyId, Guid installationId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<InstallationChecklistItemDto>> UpdateChecklistAsync(Guid societyId, Guid installationId, UpdateInstallationChecklistRequest request, CancellationToken cancellationToken = default);
-    Task<InstallationPhotoDto> AddPhotoAsync(Guid societyId, Guid installationId, AddInstallationPhotoRequest request, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<InstallationChecklistItemDto>> ListChecklistAsync(
+        Guid societyId, Guid installationId, CancellationToken cancellationToken = default);
+
+    Task<InstallationChecklistItemDto> CreateChecklistItemAsync(
+        Guid societyId, Guid installationId, CreateInstallationChecklistItemRequest request, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<InstallationChecklistItemDto>> UpdateChecklistAsync(
+        Guid societyId, Guid installationId, UpdateInstallationChecklistRequest request, CancellationToken cancellationToken = default);
+
+    Task<InstallationChecklistItemDto> UpdateChecklistItemAsync(
+        Guid societyId, Guid installationId, Guid itemId, UpdateInstallationChecklistItemRequest request, CancellationToken cancellationToken = default);
+
+    Task DeleteChecklistItemAsync(
+        Guid societyId, Guid installationId, Guid itemId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<InstallationChecklistItemDto>> InitializeChecklistAsync(
+        Guid societyId, Guid installationId, InitializeInstallationChecklistRequest? request = null, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<InstallationPhotoDto>> ListPhotosAsync(
+        Guid societyId, Guid installationId, CancellationToken cancellationToken = default);
+
+    Task<InstallationPhotoDto> UploadPhotoAsync(
+        Guid societyId,
+        Guid installationId,
+        string fileName,
+        string contentType,
+        long length,
+        Stream content,
+        CancellationToken cancellationToken = default);
+
+    Task DeletePhotoAsync(
+        Guid societyId, Guid installationId, Guid photoId, CancellationToken cancellationToken = default);
 }
 
 public sealed class InstallationListItemDto
@@ -95,6 +125,9 @@ public sealed class InstallationPhotoDto
 {
     public Guid Id { get; init; }
     public string Url { get; init; } = string.Empty;
+    public string FileName { get; init; } = string.Empty;
+    public string ContentType { get; init; } = string.Empty;
+    public long SizeBytes { get; init; }
     public DateTimeOffset UploadedAt { get; init; }
 }
 
@@ -102,6 +135,7 @@ public sealed class ChecklistItemUpdateDto
 {
     public Guid Id { get; init; }
     public bool IsCompleted { get; init; }
+    public string? Item { get; init; }
 }
 
 public sealed class UpdateInstallationChecklistRequest
@@ -109,7 +143,19 @@ public sealed class UpdateInstallationChecklistRequest
     public IReadOnlyList<ChecklistItemUpdateDto> Items { get; init; } = Array.Empty<ChecklistItemUpdateDto>();
 }
 
-public sealed class AddInstallationPhotoRequest
+public sealed class CreateInstallationChecklistItemRequest
 {
-    public string Url { get; init; } = string.Empty;
+    public string Item { get; init; } = string.Empty;
+}
+
+public sealed class UpdateInstallationChecklistItemRequest
+{
+    public string? Item { get; init; }
+    public bool? IsCompleted { get; init; }
+}
+
+public sealed class InitializeInstallationChecklistRequest
+{
+    /// <summary>Custom labels; uses society defaults when empty.</summary>
+    public IReadOnlyList<string>? Items { get; init; }
 }
