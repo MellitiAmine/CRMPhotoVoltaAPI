@@ -10,11 +10,7 @@ public class CommercialProfile : SocietyScopedEntity
     /// <summary>Reference to the tenant user account (core.Users table).</summary>
     public Guid UserId { get; set; }
 
-    // ── Personal info ────────────────────────────────────────────────────
-    public string FirstName    { get; set; } = string.Empty;
-    public string LastName     { get; set; } = string.Empty;
-    public string Email        { get; set; } = string.Empty;
-    public string? Phone       { get; set; }
+    // ── Personal info (identity fields live on core.Users) ───────────────
     public string? AvatarUrl   { get; set; }
     public string? DateOfBirth { get; set; }
     public string? Address     { get; set; }

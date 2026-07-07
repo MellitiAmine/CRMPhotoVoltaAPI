@@ -2,7 +2,9 @@
 
 > **Base URL:** `/api/v1/commercials`  
 > **Auth:** Bearer JWT (`TenantJwt` scheme, `society_id` claim required)  
-> **Last updated:** 2026-05-08
+> **Last updated:** 2026-07-07
+
+Identity fields (`firstName`, `lastName`, `email`, `phone`) are stored on `core.Users` only. See [profile-identity-deduplication.md](./profile-identity-deduplication.md).
 
 ---
 
@@ -31,10 +33,6 @@ Inherits `SocietyScopedEntity → EntityBase`.
 | `SocietyId` | `uuid` | Tenant scope (indexed) |
 | `UserId` | `uuid` | Linked tenant user (unique per society) |
 | `EmployeeId` | `varchar(50)` | HR reference (e.g. EMP-2024-001, unique per society) |
-| `FirstName` | `varchar(100)` | |
-| `LastName` | `varchar(100)` | |
-| `Email` | `varchar(200)` | |
-| `Phone` | `varchar(30)` | |
 | `AvatarUrl` | `text` | URL to profile picture |
 | `DateOfBirth` | `text` | ISO date string |
 | `Address`, `City` | `text` | |
@@ -328,7 +326,9 @@ Run the EF Core migration:
 dotnet ef database update --context AppDbContext
 ```
 
-This applies `20260508100000_AddCommercialProfiles` which creates the `app.CommercialProfiles` table and all indexes.
+This applies `20260508100000_AddCommercialProfiles` and `20260707151000_RemoveCommercialProfileIdentityDuplicates`.
+
+See [profile-identity-deduplication.md](./profile-identity-deduplication.md) for details on identity deduplication (Technicien + Commercial).
 
 ---
 

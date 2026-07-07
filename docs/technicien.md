@@ -2,7 +2,7 @@
 
 > **Base URL:** `/api/v1/techniciens`  
 > **Auth:** Bearer JWT (`TenantJwt` scheme, `society_id` claim required)  
-> **Last updated:** 2026-05-18
+> **Last updated:** 2026-07-07
 
 ---
 
@@ -18,10 +18,12 @@ The Techniciens API manages HR profiles and performance data for field technicia
 - Aggregate stats endpoint for the dashboard KPI strip
 - Calendar events for a technicien's linked user
 
+On **create** and **update**, identity fields (`firstName`, `lastName`, `email`, `phone`) are stored on `core.Users` only. The API still exposes them on technicien DTOs by reading the linked user row.
+
 On **create**, the API:
-1. Resolves or creates a `core.Users` row (by `userId` or email)
+1. Resolves or creates a `core.Users` row (by `userId` or email) and writes identity fields there
 2. Ensures `core.UserSocieties` membership with role **Technicien** (`RoleType.Technicien = 4`)
-3. Inserts `app.TechnicienProfiles` (one active profile per user per society)
+3. Inserts `app.TechnicienProfiles` (one active profile per user per society; HR/performance fields only)
 
 **Delete** is a soft-delete (`IsDeleted = true`); the linked user account is not removed.
 
@@ -39,8 +41,7 @@ Inherits `SocietyScopedEntity → EntityBase`.
 | `SocietyId` | `uuid` | Tenant scope (indexed) |
 | `UserId` | `uuid` | Linked tenant user (`core.Users.Id`, unique per society) |
 | `EmployeeId` | `varchar(50)` | HR reference (e.g. TECH-2026-001, unique per society) |
-| `FirstName`, `LastName`, `Email`, `Phone` | | Personal info |
-| `AvatarUrl`, `DateOfBirth`, `Address`, `City` | | |
+| `AvatarUrl`, `DateOfBirth`, `Address`, `City` | | Profile-only personal/HR fields |
 | `EmergencyContact*` | `text` | Name, Phone, Relation |
 | `Department`, `Position` | `varchar(120)` | |
 | `ContractType` | `varchar(30)` | CDI, CDD, Stage, Freelance, Alternance |
@@ -256,7 +257,7 @@ CREATE UNIQUE INDEX IX_TechnicienProfiles_SocietyId_EmployeeId
 dotnet ef database update --context AppDbContext
 ```
 
-Applies `20260518100000_AddTechnicienProfiles`.
+Applies technicien profile migrations. See [profile-identity-deduplication.md](./profile-identity-deduplication.md) for identity deduplication (Technicien + Commercial).
 
 ---
 
