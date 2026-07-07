@@ -35,10 +35,16 @@ public sealed class TechnicienService : ITechnicienService
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
             var s = query.Search.Trim().ToLower();
+            var matchingUserIds = await _core.Users.AsNoTracking()
+                .Where(u => !u.IsDeleted && (
+                    u.FullName.ToLower().Contains(s) ||
+                    u.Email.ToLower().Contains(s) ||
+                    (u.Phone != null && u.Phone.ToLower().Contains(s))))
+                .Select(u => u.Id)
+                .ToListAsync(ct);
+
             q = q.Where(c =>
-                c.FirstName.ToLower().Contains(s) ||
-                c.LastName.ToLower().Contains(s) ||
-                c.Email.ToLower().Contains(s) ||
+                matchingUserIds.Contains(c.UserId) ||
                 c.EmployeeId.ToLower().Contains(s) ||
                 c.Position.ToLower().Contains(s) ||
                 c.Department.ToLower().Contains(s));
@@ -64,12 +70,13 @@ public sealed class TechnicienService : ITechnicienService
         var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
         var profiles = await q
             .OrderByDescending(c => c.ScoreTotal)
-            .ThenBy(c => c.LastName)
+            .ThenBy(c => c.EmployeeId)
             .Skip((page - 1) * size)
             .Take(size)
             .ToListAsync(ct);
 
-        var items = profiles.ConvertAll(c => ToListDto(c, societyMemberIds));
+        var users = await LoadUsersByIdsAsync(profiles.Select(c => c.UserId), ct);
+        var items = profiles.ConvertAll(c => ToListDto(c, users.GetValueOrDefault(c.UserId), societyMemberIds));
         return (items, new TechnicienPageMeta(page, size, total, pages));
     }
 
@@ -78,7 +85,8 @@ public sealed class TechnicienService : ITechnicienService
         var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
         var c = await RequireAsync(societyId, relatedUserIds, id, ct);
         var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
-        return ToProfileDto(c, societyMemberIds);
+        var user = await LoadUserAsync(c.UserId, ct);
+        return ToProfileDto(c, user, societyMemberIds);
     }
 
     public async Task<TechnicienStatsDto> GetStatsAsync(Guid societyId, Guid actorUserId, CancellationToken ct = default)
@@ -116,39 +124,48 @@ public sealed class TechnicienService : ITechnicienService
             : request.EmployeeId.Trim();
 
         Guid resolvedUserId;
+        User linkedUser;
+
         if (request.UserId.HasValue)
         {
-            resolvedUserId = request.UserId.Value;
+            linkedUser = await _core.Users
+                .FirstOrDefaultAsync(u => u.Id == request.UserId.Value && !u.IsDeleted, ct)
+                ?? throw new AppException("USER_NOT_FOUND", "Compte utilisateur introuvable.", 404);
+            resolvedUserId = linkedUser.Id;
         }
         else
         {
             var normalizedEmail = request.Email.Trim().ToLowerInvariant();
-            var existingUserId = await _core.Users
-                .Where(u => u.Email == normalizedEmail && !u.IsDeleted)
-                .Select(u => (Guid?)u.Id)
-                .FirstOrDefaultAsync(ct);
+            var existingUser = await _core.Users
+                .FirstOrDefaultAsync(u => u.Email == normalizedEmail && !u.IsDeleted, ct);
 
-            if (existingUserId.HasValue)
+            if (existingUser is null)
             {
-                resolvedUserId = existingUserId.Value;
-            }
-            else
-            {
-                var newUser = new User
+                linkedUser = new User
                 {
                     Id           = Guid.NewGuid(),
                     CreatedAt    = DateTimeOffset.UtcNow,
                     CreatedById  = actorId,
                     Email        = normalizedEmail,
-                    FullName     = $"{request.FirstName} {request.LastName}".Trim(),
+                    FullName     = BuildFullName(request.FirstName, request.LastName),
                     Phone        = request.Phone,
                     PasswordHash = BCrypt.Net.BCrypt.HashPassword("ChangeMe123!"),
                     IsActive     = true,
                 };
-                _core.Users.Add(newUser);
-                resolvedUserId = newUser.Id;
+                _core.Users.Add(linkedUser);
             }
+            else
+            {
+                linkedUser = existingUser;
+            }
+
+            resolvedUserId = linkedUser.Id;
         }
+
+        ApplyUserIdentity(linkedUser, request.FirstName, request.LastName, request.Phone);
+        if (!request.UserId.HasValue)
+            linkedUser.Email = request.Email.Trim().ToLowerInvariant();
+        linkedUser.UpdatedAt = DateTimeOffset.UtcNow;
 
         var alreadyMember = await _core.UserSocieties
             .AnyAsync(us => us.UserId == resolvedUserId && us.SocietyId == societyId && !us.IsDeleted, ct);
@@ -182,9 +199,9 @@ public sealed class TechnicienService : ITechnicienService
                 SocietyId   = societyId,
                 RoleId      = technicienRole.Id,
             });
-
-            await _core.SaveChangesAsync(ct);
         }
+
+        await _core.SaveChangesAsync(ct);
 
         var userAlreadyLinked = await _db.TechnicienProfiles
             .AnyAsync(c => c.SocietyId == societyId && c.UserId == resolvedUserId, ct);
@@ -198,10 +215,6 @@ public sealed class TechnicienService : ITechnicienService
             CreatedAt   = DateTimeOffset.UtcNow,
             UserId      = resolvedUserId,
             EmployeeId  = employeeId,
-            FirstName   = request.FirstName,
-            LastName    = request.LastName,
-            Email       = request.Email,
-            Phone       = request.Phone,
             DateOfBirth = request.DateOfBirth,
             Address     = request.Address,
             City        = request.City,
@@ -224,7 +237,7 @@ public sealed class TechnicienService : ITechnicienService
         await _db.SaveChangesAsync(ct);
 
         var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
-        return ToProfileDto(profile, societyMemberIds);
+        return ToProfileDto(profile, linkedUser, societyMemberIds);
     }
 
     public async Task<TechnicienProfileDto> UpdateAsync(
@@ -233,9 +246,22 @@ public sealed class TechnicienService : ITechnicienService
         var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
         var profile = await RequireAsync(societyId, relatedUserIds, id, ct);
 
-        if (request.FirstName  is { } fn) profile.FirstName  = fn;
-        if (request.LastName   is { } ln) profile.LastName   = ln;
-        if (request.Phone      is { } ph) profile.Phone      = ph;
+        var user = await _core.Users
+            .FirstOrDefaultAsync(u => u.Id == profile.UserId && !u.IsDeleted, ct)
+            ?? throw new AppException("USER_NOT_FOUND", "Compte utilisateur introuvable.", 404);
+
+        if (request.FirstName is not null || request.LastName is not null || request.Phone is not null)
+        {
+            var identity = SplitFullName(user.FullName);
+            ApplyUserIdentity(
+                user,
+                request.FirstName ?? identity.FirstName,
+                request.LastName  ?? identity.LastName,
+                request.Phone     ?? user.Phone);
+            user.UpdatedAt = DateTimeOffset.UtcNow;
+            await _core.SaveChangesAsync(ct);
+        }
+
         if (request.DateOfBirth is { } db) profile.DateOfBirth = db;
         if (request.Address    is { } ad) profile.Address    = ad;
         if (request.City       is { } cy) profile.City       = cy;
@@ -254,7 +280,7 @@ public sealed class TechnicienService : ITechnicienService
         await _db.SaveChangesAsync(ct);
 
         var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
-        return ToProfileDto(profile, societyMemberIds);
+        return ToProfileDto(profile, user, societyMemberIds);
     }
 
     public async Task<TechnicienProfileDto> UpdateKpisAndScoreAsync(
@@ -279,7 +305,8 @@ public sealed class TechnicienService : ITechnicienService
         await _db.SaveChangesAsync(ct);
 
         var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
-        return ToProfileDto(profile, societyMemberIds);
+        var user = await LoadUserAsync(profile.UserId, ct);
+        return ToProfileDto(profile, user, societyMemberIds);
     }
 
     public async Task DeleteAsync(Guid societyId, Guid actorUserId, Guid id, CancellationToken ct = default)
@@ -379,6 +406,58 @@ public sealed class TechnicienService : ITechnicienService
         return $"{prefix}{next:000}";
     }
 
+    private async Task<User?> LoadUserAsync(Guid userId, CancellationToken ct) =>
+        await _core.Users.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == userId && !u.IsDeleted, ct);
+
+    private async Task<IReadOnlyDictionary<Guid, User>> LoadUsersByIdsAsync(
+        IEnumerable<Guid> userIds, CancellationToken ct)
+    {
+        var ids = userIds.Distinct().ToList();
+        if (ids.Count == 0)
+            return new Dictionary<Guid, User>();
+
+        return await _core.Users.AsNoTracking()
+            .Where(u => ids.Contains(u.Id) && !u.IsDeleted)
+            .ToDictionaryAsync(u => u.Id, ct);
+    }
+
+    private static (string FirstName, string LastName) SplitFullName(string fullName)
+    {
+        var trimmed = fullName.Trim();
+        if (trimmed.Length == 0)
+            return ("", "");
+
+        var space = trimmed.IndexOf(' ');
+        return space < 0
+            ? (trimmed, "")
+            : (trimmed[..space], trimmed[(space + 1)..].Trim());
+    }
+
+    private static string BuildFullName(string firstName, string lastName) =>
+        $"{firstName} {lastName}".Trim();
+
+    private static void ApplyUserIdentity(User user, string firstName, string lastName, string? phone)
+    {
+        user.FullName = BuildFullName(firstName, lastName);
+        user.Phone    = phone;
+    }
+
+    private static TechnicienUserIdentity GetIdentity(User? user)
+    {
+        if (user is null)
+            return new TechnicienUserIdentity("", "", "", null);
+
+        var (firstName, lastName) = SplitFullName(user.FullName);
+        return new TechnicienUserIdentity(firstName, lastName, user.Email, user.Phone);
+    }
+
+    private sealed record TechnicienUserIdentity(
+        string FirstName,
+        string LastName,
+        string Email,
+        string? Phone);
+
     private static void ComputeAndApplyScore(TechnicienProfile p)
     {
         const double maxInt  = 40, maxVisit = 15, maxProj = 30, maxInst = 8;
@@ -443,52 +522,62 @@ public sealed class TechnicienService : ITechnicienService
         AttendancePct:     c.AttendancePct
     );
 
-    private static TechnicienListItemDto ToListDto(TechnicienProfile c, HashSet<Guid> societyMemberIds) => new(
-        Id:            c.Id,
-        UserId:        societyMemberIds.Contains(c.UserId) ? c.UserId : null,
-        EmployeeId:    c.EmployeeId,
-        FirstName:     c.FirstName,
-        LastName:      c.LastName,
-        Email:         c.Email,
-        Phone:         c.Phone,
-        Department:    c.Department,
-        Position:      c.Position,
-        ContractType:  c.ContractType,
-        WorkTime:      c.WorkTime,
-        Status:        c.Status,
-        StartDate:     c.StartDate,
-        Salary:        c.Salary,
-        MonthlyTarget: c.MonthlyTarget,
-        Score:         BuildScore(c),
-        Kpis:          BuildKpis(c),
-        Attendance:    BuildAttendance(c)
-    );
+    private static TechnicienListItemDto ToListDto(
+        TechnicienProfile c, User? user, HashSet<Guid> societyMemberIds)
+    {
+        var identity = GetIdentity(user);
+        return new(
+            Id:            c.Id,
+            UserId:        societyMemberIds.Contains(c.UserId) ? c.UserId : null,
+            EmployeeId:    c.EmployeeId,
+            FirstName:     identity.FirstName,
+            LastName:      identity.LastName,
+            Email:         identity.Email,
+            Phone:         identity.Phone,
+            Department:    c.Department,
+            Position:      c.Position,
+            ContractType:  c.ContractType,
+            WorkTime:      c.WorkTime,
+            Status:        c.Status,
+            StartDate:     c.StartDate,
+            Salary:        c.Salary,
+            MonthlyTarget: c.MonthlyTarget,
+            Score:         BuildScore(c),
+            Kpis:          BuildKpis(c),
+            Attendance:    BuildAttendance(c)
+        );
+    }
 
-    private static TechnicienProfileDto ToProfileDto(TechnicienProfile c, HashSet<Guid> societyMemberIds) => new(
-        Id:            c.Id,
-        UserId:        societyMemberIds.Contains(c.UserId) ? c.UserId : null,
-        EmployeeId:    c.EmployeeId,
-        FirstName:     c.FirstName,
-        LastName:      c.LastName,
-        Email:         c.Email,
-        Phone:         c.Phone,
-        AvatarUrl:     c.AvatarUrl,
-        DateOfBirth:   c.DateOfBirth,
-        Address:       c.Address,
-        City:          c.City,
-        Department:    c.Department,
-        Position:      c.Position,
-        ContractType:  c.ContractType,
-        WorkTime:      c.WorkTime,
-        Salary:        c.Salary,
-        Status:        c.Status,
-        StartDate:     c.StartDate,
-        MonthlyTarget: c.MonthlyTarget,
-        Score:         BuildScore(c),
-        Kpis:          BuildKpis(c),
-        Attendance:    BuildAttendance(c),
-        EmergencyContact: new(c.EmergencyContactName, c.EmergencyContactPhone, c.EmergencyContactRelation),
-        CreatedAt:     c.CreatedAt,
-        UpdatedAt:     c.UpdatedAt
-    );
+    private static TechnicienProfileDto ToProfileDto(
+        TechnicienProfile c, User? user, HashSet<Guid> societyMemberIds)
+    {
+        var identity = GetIdentity(user);
+        return new(
+            Id:            c.Id,
+            UserId:        societyMemberIds.Contains(c.UserId) ? c.UserId : null,
+            EmployeeId:    c.EmployeeId,
+            FirstName:     identity.FirstName,
+            LastName:      identity.LastName,
+            Email:         identity.Email,
+            Phone:         identity.Phone,
+            AvatarUrl:     c.AvatarUrl,
+            DateOfBirth:   c.DateOfBirth,
+            Address:       c.Address,
+            City:          c.City,
+            Department:    c.Department,
+            Position:      c.Position,
+            ContractType:  c.ContractType,
+            WorkTime:      c.WorkTime,
+            Salary:        c.Salary,
+            Status:        c.Status,
+            StartDate:     c.StartDate,
+            MonthlyTarget: c.MonthlyTarget,
+            Score:         BuildScore(c),
+            Kpis:          BuildKpis(c),
+            Attendance:    BuildAttendance(c),
+            EmergencyContact: new(c.EmergencyContactName, c.EmergencyContactPhone, c.EmergencyContactRelation),
+            CreatedAt:     c.CreatedAt,
+            UpdatedAt:     c.UpdatedAt
+        );
+    }
 }
