@@ -21,10 +21,18 @@ public sealed class ClientsController : TenantCrmControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] PaginationQuery query, CancellationToken cancellationToken)
+    public async Task<IActionResult> List(
+        [FromQuery] string? search = null,
+        [FromQuery] string? activity = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string sortOrder = "desc",
+        CancellationToken cancellationToken = default)
     {
         var societyId = RequireSociety();
-        var (items, meta) = await _clients.ListPagedAsync(societyId, query.ToRequest(), cancellationToken);
+        var query = new ClientListQuery(search, activity, page, pageSize, sortBy, sortOrder);
+        var (items, meta) = await _clients.ListPagedAsync(societyId, query, cancellationToken);
         return Ok(ApiResponse.OkPaged(items, meta));
     }
 
@@ -34,6 +42,15 @@ public sealed class ClientsController : TenantCrmControllerBase
         var societyId = RequireSociety();
         var item = await _clients.GetAsync(societyId, id, cancellationToken);
         return Ok(ApiResponse.Ok(item));
+    }
+
+    /// <summary>Vue 360° client : projets, factures, installations, paiements.</summary>
+    [HttpGet("{id:guid}/360")]
+    public async Task<IActionResult> Get360(Guid id, CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var detail = await _clients.Get360Async(societyId, id, cancellationToken);
+        return Ok(ApiResponse.Ok(detail));
     }
 
     [HttpPost]

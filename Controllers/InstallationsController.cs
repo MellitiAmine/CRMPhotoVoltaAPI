@@ -2,9 +2,13 @@ using CrmPhotoVolta.Application.Abstractions;
 using CrmPhotoVolta.Application.Auth;
 using CrmPhotoVolta.Application.Common;
 using CrmPhotoVolta.Application.Crm.Installations;
+using CrmPhotoVolta.Application.Exceptions;
+using CrmPhotoVolta.Domain.App;
+using CrmPhotoVolta.Infrastructure.Data.Core;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace CrmPhotoVoltaApis.Controllers;
 
@@ -13,11 +17,21 @@ namespace CrmPhotoVoltaApis.Controllers;
 [Route("api/v1/installations")]
 public sealed class InstallationsController : TenantCrmControllerBase
 {
-    private readonly IInstallationWorkflowService _installations;
+    private static readonly string[] PlanningAdminRoles = ["Admin", "Manager"];
 
-    public InstallationsController(ITenantContext tenant, IInstallationWorkflowService installations) : base(tenant)
+    private readonly IInstallationWorkflowService _installations;
+    private readonly ICurrentUser _currentUser;
+    private readonly CoreDbContext _core;
+
+    public InstallationsController(
+        ITenantContext tenant,
+        IInstallationWorkflowService installations,
+        ICurrentUser currentUser,
+        CoreDbContext core) : base(tenant)
     {
         _installations = installations;
+        _currentUser   = currentUser;
+        _core          = core;
     }
 
     [HttpGet]
@@ -30,6 +44,52 @@ public sealed class InstallationsController : TenantCrmControllerBase
         var (items, meta) = await _installations.ListPagedAsync(
             RequireSociety(), projectId, technicianId, query.ToRequest(), cancellationToken);
         return Ok(ApiResponse.OkPaged(items, meta));
+    }
+
+    /// <summary>Planning global — Admin / Manager uniquement.</summary>
+    [HttpGet("planning")]
+    public async Task<IActionResult> Planning(
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
+        [FromQuery] Guid? technicianId,
+        [FromQuery] InstallationStatus? status,
+        CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var userId = _currentUser.UserId
+            ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+
+        if (!await HasPlanningAdminAccessAsync(societyId, userId, cancellationToken))
+            throw new AppException("FORBIDDEN", "Only Admin or Manager can view the full technician planning.", 403);
+
+        var planning = await _installations.GetPlanningAsync(
+            societyId,
+            new InstallationPlanningQuery(from, to, technicianId, status),
+            restrictToTechnicianUserId: null,
+            cancellationToken);
+
+        return Ok(ApiResponse.Ok(planning));
+    }
+
+    /// <summary>Mon planning — installations assignées à l'utilisateur connecté.</summary>
+    [HttpGet("my-planning")]
+    public async Task<IActionResult> MyPlanning(
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
+        [FromQuery] InstallationStatus? status,
+        CancellationToken cancellationToken)
+    {
+        var societyId = RequireSociety();
+        var userId = _currentUser.UserId
+            ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+
+        var planning = await _installations.GetPlanningAsync(
+            societyId,
+            new InstallationPlanningQuery(from, to, TechnicianId: null, status),
+            restrictToTechnicianUserId: userId,
+            cancellationToken);
+
+        return Ok(ApiResponse.Ok(planning));
     }
 
     [HttpGet("{id:guid}")]
@@ -68,7 +128,6 @@ public sealed class InstallationsController : TenantCrmControllerBase
         return Ok(ApiResponse.Ok(updated));
     }
 
-    /// <summary>Returns all checklist items for an installation (creation order).</summary>
     [HttpGet("{id:guid}/checklist")]
     public async Task<IActionResult> ListChecklist(Guid id, CancellationToken cancellationToken)
     {
@@ -76,7 +135,6 @@ public sealed class InstallationsController : TenantCrmControllerBase
         return Ok(ApiResponse.Ok(list));
     }
 
-    /// <summary>Adds a single checklist item.</summary>
     [HttpPost("{id:guid}/checklist")]
     [ProducesResponseType(StatusCodes.Status201Created)]
     public async Task<IActionResult> CreateChecklistItem(
@@ -88,7 +146,6 @@ public sealed class InstallationsController : TenantCrmControllerBase
         return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(created));
     }
 
-    /// <summary>Seeds the default checklist when the installation has no items yet.</summary>
     [HttpPost("{id:guid}/checklist/initialize")]
     public async Task<IActionResult> InitializeChecklist(
         Guid id,
@@ -99,7 +156,6 @@ public sealed class InstallationsController : TenantCrmControllerBase
         return Ok(ApiResponse.Ok(list));
     }
 
-    /// <summary>Bulk-updates completion status (and optionally labels) for multiple items.</summary>
     [HttpPut("{id:guid}/checklist")]
     public async Task<IActionResult> UpdateChecklist(Guid id, [FromBody] UpdateInstallationChecklistRequest request, CancellationToken cancellationToken)
     {
@@ -107,7 +163,6 @@ public sealed class InstallationsController : TenantCrmControllerBase
         return Ok(ApiResponse.Ok(list));
     }
 
-    /// <summary>Updates a single checklist item (label and/or completed flag).</summary>
     [HttpPut("{id:guid}/checklist/{itemId:guid}")]
     public async Task<IActionResult> UpdateChecklistItem(
         Guid id,
@@ -119,7 +174,6 @@ public sealed class InstallationsController : TenantCrmControllerBase
         return Ok(ApiResponse.Ok(updated));
     }
 
-    /// <summary>Soft-deletes a checklist item.</summary>
     [HttpDelete("{id:guid}/checklist/{itemId:guid}")]
     public async Task<IActionResult> DeleteChecklistItem(Guid id, Guid itemId, CancellationToken cancellationToken)
     {
@@ -161,4 +215,16 @@ public sealed class InstallationsController : TenantCrmControllerBase
         await _installations.DeletePhotoAsync(RequireSociety(), id, photoId, cancellationToken);
         return Ok(ApiResponse.Ok(new { deleted = true }));
     }
+
+    private async Task<bool> HasPlanningAdminAccessAsync(Guid societyId, Guid userId, CancellationToken cancellationToken) =>
+        await _core.UserSocieties
+            .AsNoTracking()
+            .Include(x => x.Role)
+            .AnyAsync(x =>
+                !x.IsDeleted &&
+                x.UserId == userId &&
+                x.SocietyId == societyId &&
+                x.Role != null &&
+                PlanningAdminRoles.Contains(x.Role.Name),
+                cancellationToken);
 }

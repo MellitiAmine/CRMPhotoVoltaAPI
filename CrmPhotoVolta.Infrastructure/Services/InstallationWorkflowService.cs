@@ -78,6 +78,56 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
         return (items, pagination.ToMeta(total));
     }
 
+    public async Task<InstallationPlanningDto> GetPlanningAsync(
+        Guid societyId,
+        InstallationPlanningQuery query,
+        Guid? restrictToTechnicianUserId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var from = query.From ?? today.AddDays(-7);
+        var to = query.To ?? today.AddDays(30);
+        if (to < from)
+            throw new AppException("VALIDATION_ERROR", "'to' must be on or after 'from'.", 400);
+
+        var effectiveTechnicianId = restrictToTechnicianUserId ?? query.TechnicianId;
+
+        var dbQuery = _app.Installations.AsNoTracking()
+            .Include(x => x.Project).ThenInclude(p => p.Client)
+            .Include(x => x.Checklist)
+            .Where(x => x.SocietyId == societyId && x.Date >= from && x.Date <= to);
+
+        if (effectiveTechnicianId is { } tid)
+            dbQuery = dbQuery.Where(x => x.TechnicianId == tid);
+
+        if (query.Status is { } status)
+            dbQuery = dbQuery.Where(x => x.Status == status);
+
+        var rows = await dbQuery
+            .OrderBy(x => x.Date)
+            .ThenBy(x => x.TechnicianId)
+            .ToListAsync(cancellationToken);
+
+        var techNames = await ProjectUserNameResolver.LoadNamesAsync(
+            _core, rows.Select(x => (Guid?)x.TechnicianId), cancellationToken);
+
+        var items = rows.Select(x => MapPlanningItem(x, ProjectUserNameResolver.Resolve(techNames, x.TechnicianId))).ToList();
+
+        var technicians = restrictToTechnicianUserId is null
+            ? BuildTechnicianSummaries(items)
+            : Array.Empty<TechnicianPlanningSummaryDto>();
+
+        return new InstallationPlanningDto
+        {
+            From            = from,
+            To              = to,
+            IsPersonalView  = restrictToTechnicianUserId is not null,
+            TechnicianId    = effectiveTechnicianId,
+            Items           = items,
+            Technicians     = technicians
+        };
+    }
+
     public async Task<IReadOnlyList<InstallationListItemDto>> ListByProjectAsync(
         Guid societyId,
         Guid projectId,
@@ -537,6 +587,44 @@ public sealed class InstallationWorkflowService : IInstallationWorkflowService
             UpdatedAt = x.UpdatedAt
         };
     }
+
+    private static InstallationPlanningItemDto MapPlanningItem(Installation x, string? technicianName)
+    {
+        var checklist = x.Checklist;
+        return new InstallationPlanningItemDto
+        {
+            Id                 = x.Id,
+            ProjectId          = x.ProjectId,
+            ProjectReference   = x.Project.Reference,
+            ProjectName        = x.Project.Name,
+            ClientName         = x.Project.Client?.Name ?? string.Empty,
+            Address            = x.Project.Address,
+            TechnicianId       = x.TechnicianId,
+            TechnicianName     = technicianName,
+            Date               = x.Date,
+            Status             = x.Status,
+            ChecklistCompleted = checklist.Count(c => c.IsCompleted),
+            ChecklistTotal     = checklist.Count,
+            CreatedAt          = x.CreatedAt,
+            UpdatedAt          = x.UpdatedAt
+        };
+    }
+
+    private static IReadOnlyList<TechnicianPlanningSummaryDto> BuildTechnicianSummaries(
+        IReadOnlyList<InstallationPlanningItemDto> items) =>
+        items
+            .GroupBy(x => x.TechnicianId)
+            .Select(g => new TechnicianPlanningSummaryDto
+            {
+                TechnicianId    = g.Key,
+                TechnicianName  = g.First().TechnicianName,
+                TotalCount      = g.Count(),
+                ScheduledCount  = g.Count(x => x.Status == InstallationStatus.Scheduled),
+                InProgressCount = g.Count(x => x.Status == InstallationStatus.InProgress),
+                CompletedCount  = g.Count(x => x.Status == InstallationStatus.Completed)
+            })
+            .OrderBy(x => x.TechnicianName)
+            .ToList();
 
     private static InstallationListItemDto MapListItem(Installation x, string? technicianName)
     {
