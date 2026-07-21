@@ -19,19 +19,22 @@ namespace CrmPhotoVoltaApis.Controllers;
 [Route("api/v1/commercials")]
 public sealed class CommercialsController : TenantCrmControllerBase
 {
-    private readonly ICommercialService   _commercials;
-    private readonly ICalendarQueryService _calendarQuery;
-    private readonly ICurrentUser         _currentUser;
+    private readonly ICommercialService        _commercials;
+    private readonly ICommercialTimeEntryService _timeEntries;
+    private readonly ICalendarQueryService     _calendarQuery;
+    private readonly ICurrentUser                _currentUser;
 
     public CommercialsController(
         ITenantContext tenant,
         ICommercialService commercials,
+        ICommercialTimeEntryService timeEntries,
         ICalendarQueryService calendarQuery,
         ICurrentUser currentUser) : base(tenant)
     {
-        _commercials    = commercials;
-        _calendarQuery  = calendarQuery;
-        _currentUser    = currentUser;
+        _commercials   = commercials;
+        _timeEntries   = timeEntries;
+        _calendarQuery = calendarQuery;
+        _currentUser   = currentUser;
     }
 
     // ── GET /api/v1/commercials ──────────────────────────────────────────
@@ -76,6 +79,19 @@ public sealed class CommercialsController : TenantCrmControllerBase
             ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
         var stats = await _commercials.GetStatsAsync(societyId, actorId, ct);
         return Ok(ApiResponse.Ok(stats));
+    }
+
+    // ── GET /api/v1/commercials/me ───────────────────────────────────────
+
+    /// <summary>Profile of the authenticated commercial user (self-service pointage).</summary>
+    [HttpGet("me")]
+    public async Task<IActionResult> GetMe(CancellationToken ct = default)
+    {
+        var societyId = RequireSociety();
+        var actorId   = _currentUser.UserId
+            ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var profile = await _commercials.GetMeAsync(societyId, actorId, ct);
+        return Ok(ApiResponse.Ok(profile));
     }
 
     // ── GET /api/v1/commercials/{id} ─────────────────────────────────────
@@ -185,5 +201,117 @@ public sealed class CommercialsController : TenantCrmControllerBase
             ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
         await _commercials.DeleteAsync(societyId, actorId, id, ct);
         return Ok(ApiResponse.Ok(new { deleted = true }));
+    }
+
+    // ── PATCH /api/v1/commercials/{id}/attendance ─────────────────────────
+
+    /// <summary>Updates the current-month attendance snapshot.</summary>
+    [HttpPatch("{id:guid}/attendance")]
+    public async Task<IActionResult> UpdateAttendance(
+        Guid id,
+        [FromBody] UpdateCommercialAttendanceRequest request,
+        CancellationToken ct = default)
+    {
+        var societyId = RequireSociety();
+        var actorId   = _currentUser.UserId
+            ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var updated = await _commercials.UpdateAttendanceAsync(societyId, actorId, id, request, ct);
+        return Ok(ApiResponse.Ok(updated));
+    }
+
+    // ── POST /api/v1/commercials/{id}/sync-kpis ───────────────────────────
+
+    /// <summary>Recomputes KPIs from CRM data (leads, quotes, calendar).</summary>
+    [HttpPost("{id:guid}/sync-kpis")]
+    public async Task<IActionResult> SyncKpis(Guid id, CancellationToken ct = default)
+    {
+        var societyId = RequireSociety();
+        var actorId   = _currentUser.UserId
+            ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var updated = await _commercials.SyncKpisAsync(societyId, actorId, id, ct);
+        return Ok(ApiResponse.Ok(updated));
+    }
+
+    // ── PATCH /api/v1/commercials/{id}/account ────────────────────────────
+
+    /// <summary>Updates login email and/or password for the linked CRM user.</summary>
+    [HttpPatch("{id:guid}/account")]
+    public async Task<IActionResult> UpdateAccount(
+        Guid id,
+        [FromBody] UpdateCommercialAccountRequest request,
+        CancellationToken ct = default)
+    {
+        var societyId = RequireSociety();
+        var actorId   = _currentUser.UserId
+            ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        await _commercials.UpdateAccountAsync(societyId, actorId, id, request, ct);
+        return Ok(ApiResponse.Ok(new { updated = true }));
+    }
+
+    // ── Time entries (pointage) ───────────────────────────────────────────
+
+    [HttpGet("{id:guid}/time-entries")]
+    public async Task<IActionResult> GetTimeMonth(
+        Guid id,
+        [FromQuery] int year,
+        [FromQuery] int month,
+        CancellationToken ct = default)
+    {
+        var societyId = RequireSociety();
+        var actorId   = _currentUser.UserId
+            ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var bundle = await _timeEntries.GetMonthAsync(societyId, actorId, id, year, month, ct);
+        return Ok(ApiResponse.Ok(bundle));
+    }
+
+    [HttpPost("{id:guid}/time-entries")]
+    public async Task<IActionResult> CreateTimeEntry(
+        Guid id,
+        [FromBody] CreateCommercialTimeEntryRequest request,
+        CancellationToken ct = default)
+    {
+        var societyId = RequireSociety();
+        var actorId   = _currentUser.UserId
+            ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var created = await _timeEntries.CreateAsync(societyId, actorId, id, request, ct);
+        return StatusCode(StatusCodes.Status201Created, ApiResponse.Ok(created));
+    }
+
+    [HttpPut("{id:guid}/time-entries/{entryId:guid}")]
+    public async Task<IActionResult> UpdateTimeEntry(
+        Guid id,
+        Guid entryId,
+        [FromBody] UpdateCommercialTimeEntryRequest request,
+        CancellationToken ct = default)
+    {
+        var societyId = RequireSociety();
+        var actorId   = _currentUser.UserId
+            ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var updated = await _timeEntries.UpdateAsync(societyId, actorId, id, entryId, request, ct);
+        return Ok(ApiResponse.Ok(updated));
+    }
+
+    [HttpDelete("{id:guid}/time-entries/{entryId:guid}")]
+    public async Task<IActionResult> DeleteTimeEntry(Guid id, Guid entryId, CancellationToken ct = default)
+    {
+        var societyId = RequireSociety();
+        var actorId   = _currentUser.UserId
+            ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        await _timeEntries.DeleteAsync(societyId, actorId, id, entryId, ct);
+        return Ok(ApiResponse.Ok(new { deleted = true }));
+    }
+
+    [HttpPost("{id:guid}/attendance/recompute")]
+    public async Task<IActionResult> RecomputeAttendance(
+        Guid id,
+        [FromQuery] int year,
+        [FromQuery] int month,
+        CancellationToken ct = default)
+    {
+        var societyId = RequireSociety();
+        var actorId   = _currentUser.UserId
+            ?? throw new AppException("UNAUTHORIZED", "Unauthorized.", 401);
+        var summary = await _timeEntries.RecomputeMonthAsync(societyId, actorId, id, year, month, ct);
+        return Ok(ApiResponse.Ok(summary));
     }
 }

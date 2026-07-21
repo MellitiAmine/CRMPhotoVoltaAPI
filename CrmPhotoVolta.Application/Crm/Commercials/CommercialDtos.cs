@@ -137,7 +137,9 @@ public sealed record CreateCommercialRequest(
     decimal MonthlyTarget = 0,
     string? EmergencyContactName     = null,
     string? EmergencyContactPhone    = null,
-    string? EmergencyContactRelation = null
+    string? EmergencyContactRelation = null,
+    /// <summary>Initial login password. If omitted, a secure temporary password is generated.</summary>
+    string? Password = null
 );
 
 public sealed record UpdateCommercialRequest(
@@ -168,6 +170,15 @@ public sealed record UpdateCommercialKpisRequest(
     decimal RevenueGenerated,
     double  ConversionRate,
     int     Penalties
+);
+
+public sealed record UpdateCommercialAttendanceRequest(
+    int    PresentDays,
+    int    TotalWorkingDays,
+    int    AbsentDays,
+    int    LateDays,
+    double HoursWorked,
+    double ExpectedHours
 );
 
 public sealed record CommercialListQuery(

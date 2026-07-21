@@ -1,4 +1,5 @@
 using CrmPhotoVolta.Application.Common;
+using CrmPhotoVolta.Application.Crm.Commercials;
 using CrmPhotoVolta.Application.Crm.Quotes;
 using CrmPhotoVolta.Application.Exceptions;
 using CrmPhotoVolta.Domain.App;
@@ -10,10 +11,12 @@ namespace CrmPhotoVolta.Infrastructure.Services;
 public sealed class QuoteService : IQuoteService
 {
     private readonly AppDbContext _app;
+    private readonly ICommercialKpiSyncService _commercialKpiSync;
 
-    public QuoteService(AppDbContext app)
+    public QuoteService(AppDbContext app, ICommercialKpiSyncService commercialKpiSync)
     {
         _app = app;
+        _commercialKpiSync = commercialKpiSync;
     }
 
     public async Task<(IReadOnlyList<QuoteListItemDto> Items, PaginationMeta Meta)> ListPagedAsync(
@@ -107,6 +110,16 @@ public sealed class QuoteService : IQuoteService
         _app.Quotes.Add(quote);
         await ReplaceItemsAsync(quote, societyId, request.Items ?? Array.Empty<QuoteItemWriteDto>(), cancellationToken);
         await _app.SaveChangesAsync(cancellationToken);
+
+        if (leadId.HasValue)
+        {
+            var assigneeId = await _app.Leads.AsNoTracking()
+                .Where(l => l.Id == leadId.Value && l.SocietyId == societyId)
+                .Select(l => l.AssignedToUserId)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (assigneeId.HasValue)
+                await _commercialKpiSync.SyncForUserAsync(societyId, assigneeId.Value, cancellationToken);
+        }
 
         return Map(await ReloadQuoteAsync(quote.Id, cancellationToken));
     }

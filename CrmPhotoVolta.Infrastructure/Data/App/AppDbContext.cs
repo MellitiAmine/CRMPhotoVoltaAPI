@@ -44,6 +44,8 @@ public sealed class AppDbContext : DbContext
     public DbSet<SocietySettings> SocietySettings => Set<SocietySettings>();
     public DbSet<WhatsAppRecommendation> WhatsAppRecommendations => Set<WhatsAppRecommendation>();
     public DbSet<CommercialProfile> CommercialProfiles => Set<CommercialProfile>();
+    public DbSet<CommercialTimeEntry> CommercialTimeEntries => Set<CommercialTimeEntry>();
+    public DbSet<CommercialAttendanceMonth> CommercialAttendanceMonths => Set<CommercialAttendanceMonth>();
     public DbSet<TechnicienProfile> TechnicienProfiles => Set<TechnicienProfile>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -399,6 +401,24 @@ public sealed class AppDbContext : DbContext
             b.Property(x => x.KpiRevenueGenerated).HasPrecision(18, 2);
         });
 
+        modelBuilder.Entity<CommercialTimeEntry>(b =>
+        {
+            b.ToTable("CommercialTimeEntries");
+            b.HasIndex(x => new { x.SocietyId, x.CommercialProfileId, x.WorkDate })
+                .HasDatabaseName("IX_CommercialTimeEntries_SocietyId_Profile_WorkDate");
+            b.HasOne(x => x.CommercialProfile).WithMany().HasForeignKey(x => x.CommercialProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<CommercialAttendanceMonth>(b =>
+        {
+            b.ToTable("CommercialAttendanceMonths");
+            b.HasIndex(x => new { x.SocietyId, x.CommercialProfileId, x.Year, x.Month }).IsUnique()
+                .HasDatabaseName("IX_CommercialAttendanceMonths_SocietyId_Profile_Year_Month");
+            b.HasOne(x => x.CommercialProfile).WithMany().HasForeignKey(x => x.CommercialProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<TechnicienProfile>(b =>
         {
             b.ToTable("TechnicienProfiles");
@@ -451,6 +471,8 @@ public sealed class AppDbContext : DbContext
         modelBuilder.Entity<SocietySettings>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<WhatsAppRecommendation>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<CommercialProfile>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<CommercialTimeEntry>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
+        modelBuilder.Entity<CommercialAttendanceMonth>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
         modelBuilder.Entity<TechnicienProfile>().HasQueryFilter(x => !x.IsDeleted && (_tenantSocietyId == null || x.SocietyId == _tenantSocietyId));
     }
 }

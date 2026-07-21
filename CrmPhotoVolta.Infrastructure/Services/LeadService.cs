@@ -1,5 +1,6 @@
 using CrmPhotoVolta.Application.Common;
 using CrmPhotoVolta.Application.Crm.Leads;
+using CrmPhotoVolta.Application.Crm.Commercials;
 using CrmPhotoVolta.Application.Exceptions;
 using CrmPhotoVolta.Application.Automation;
 using CrmPhotoVolta.Application.Scoring;
@@ -19,6 +20,7 @@ public sealed class LeadService : ILeadService
     private readonly ILeadSdAutomationService _sdAutomation;
     private readonly ILeadJournalService _journal;
     private readonly ILeadWonOrchestrationService _wonOrchestration;
+    private readonly ICommercialKpiSyncService _commercialKpiSync;
 
     public LeadService(
         AppDbContext app,
@@ -26,7 +28,8 @@ public sealed class LeadService : ILeadService
         ILeadScoringService scoring,
         ILeadSdAutomationService sdAutomation,
         ILeadJournalService journal,
-        ILeadWonOrchestrationService wonOrchestration)
+        ILeadWonOrchestrationService wonOrchestration,
+        ICommercialKpiSyncService commercialKpiSync)
     {
         _app = app;
         _core = core;
@@ -34,6 +37,7 @@ public sealed class LeadService : ILeadService
         _sdAutomation = sdAutomation;
         _journal = journal;
         _wonOrchestration = wonOrchestration;
+        _commercialKpiSync = commercialKpiSync;
     }
 
     private static bool IsLegacyAuditActivityType(LeadActivityType t) =>
@@ -414,6 +418,7 @@ public sealed class LeadService : ILeadService
 
         await _app.SaveChangesAsync(cancellationToken);
         await ApplyScoreAsync(leadId, societyId, cancellationToken);
+        await _commercialKpiSync.SyncForUserAsync(societyId, request.UserId, cancellationToken);
         return Map(await _app.Leads.AsNoTracking().FirstAsync(x => x.Id == leadId, cancellationToken));
     }
 
@@ -511,6 +516,13 @@ public sealed class LeadService : ILeadService
 
         await _app.SaveChangesAsync(cancellationToken);
         await ApplyScoreAsync(leadId, societyId, cancellationToken);
+
+        var assigneeId = (await _app.Leads.AsNoTracking()
+            .Where(x => x.Id == leadId)
+            .Select(x => x.AssignedToUserId)
+            .FirstOrDefaultAsync(cancellationToken));
+        if (assigneeId.HasValue)
+            await _commercialKpiSync.SyncForUserAsync(societyId, assigneeId.Value, cancellationToken);
 
         return new LeadWonResultDto
         {

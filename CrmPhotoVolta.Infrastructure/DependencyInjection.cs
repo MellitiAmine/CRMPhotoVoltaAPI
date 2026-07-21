@@ -98,6 +98,8 @@ public static class DependencyInjection
         services.AddScoped<ITenantProvisioningService, TenantProvisioningService>();
 
         services.AddScoped<ICommercialService, CommercialService>();
+        services.AddScoped<ICommercialKpiSyncService, CommercialKpiSyncService>();
+        services.AddScoped<ICommercialTimeEntryService, CommercialTimeEntryService>();
         services.AddScoped<ITechnicienService, TechnicienService>();
         services.AddScoped<ILeadJournalService, LeadJournalService>();
         services.AddScoped<ILeadService, LeadService>();

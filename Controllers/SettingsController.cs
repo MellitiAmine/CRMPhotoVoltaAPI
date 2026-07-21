@@ -27,6 +27,7 @@ public sealed class SettingsController : TenantCrmControllerBase
     }
 
     [HttpPut]
+    [Authorize(Policy = SocietyPolicies.Admin)]
     public async Task<IActionResult> Put([FromBody] UpdateSocietySettingsRequest request, CancellationToken cancellationToken)
     {
         var data = await _settings.UpdateAsync(RequireSociety(), request, cancellationToken);

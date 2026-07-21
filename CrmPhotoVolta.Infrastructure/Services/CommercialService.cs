@@ -16,11 +16,13 @@ public sealed class CommercialService : ICommercialService
 {
     private readonly AppDbContext _db;
     private readonly CoreDbContext _core;
+    private readonly ICommercialKpiSyncService _kpiSync;
 
-    public CommercialService(AppDbContext db, CoreDbContext core)
+    public CommercialService(AppDbContext db, CoreDbContext core, ICommercialKpiSyncService kpiSync)
     {
         _db = db;
         _core = core;
+        _kpiSync = kpiSync;
     }
 
     // ── Queries ───────────────────────────────────────────────────────────
@@ -28,12 +30,13 @@ public sealed class CommercialService : ICommercialService
     public async Task<(IReadOnlyList<CommercialListItemDto> Items, CommercialPageMeta Meta)>
         ListAsync(Guid societyId, Guid actorUserId, CommercialListQuery query, CancellationToken ct = default)
     {
-        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
-        var q = _db.CommercialProfiles
-            .Where(c => c.SocietyId == societyId)
-            .Where(c =>
-                (c.CreatedById.HasValue && relatedUserIds.Contains(c.CreatedById.Value))
-                || relatedUserIds.Contains(c.UserId));
+        var viewAll = await CanViewAllCommercialsAsync(societyId, actorUserId, ct);
+        var relatedUserIds = viewAll
+            ? null
+            : await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
+
+        var q = _db.CommercialProfiles.Where(c => c.SocietyId == societyId);
+        q = ApplyVisibilityFilter(q, viewAll, relatedUserIds);
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
@@ -79,8 +82,14 @@ public sealed class CommercialService : ICommercialService
 
     public async Task<CommercialProfileDto> GetAsync(Guid societyId, Guid actorUserId, Guid id, CancellationToken ct = default)
     {
-        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
-        var c = await RequireAsync(societyId, relatedUserIds, id, ct);
+        var viewAll = await CanViewAllCommercialsAsync(societyId, actorUserId, ct);
+        var relatedUserIds = viewAll
+            ? null
+            : await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
+        var c = await RequireAsync(societyId, viewAll, relatedUserIds, id, ct);
+
+        await _kpiSync.SyncForProfileAsync(societyId, id, ct);
+        c = await _db.CommercialProfiles.FirstAsync(x => x.SocietyId == societyId && x.Id == id, ct);
 
         var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
         return ToProfileDto(c, societyMemberIds);
@@ -88,13 +97,14 @@ public sealed class CommercialService : ICommercialService
 
     public async Task<CommercialStatsDto> GetStatsAsync(Guid societyId, Guid actorUserId, CancellationToken ct = default)
     {
-        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
-        var all = await _db.CommercialProfiles
-            .Where(c => c.SocietyId == societyId)
-            .Where(c =>
-                (c.CreatedById.HasValue && relatedUserIds.Contains(c.CreatedById.Value))
-                || relatedUserIds.Contains(c.UserId))
-            .ToListAsync(ct);
+        var viewAll = await CanViewAllCommercialsAsync(societyId, actorUserId, ct);
+        var relatedUserIds = viewAll
+            ? null
+            : await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
+
+        var q = _db.CommercialProfiles.Where(c => c.SocietyId == societyId);
+        q = ApplyVisibilityFilter(q, viewAll, relatedUserIds);
+        var all = await q.ToListAsync(ct);
 
         if (all.Count == 0)
             return new CommercialStatsDto(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -113,36 +123,52 @@ public sealed class CommercialService : ICommercialService
         );
     }
 
+    public async Task<CommercialProfileDto> GetMeAsync(Guid societyId, Guid actorUserId, CancellationToken ct = default)
+    {
+        var profile = await _db.CommercialProfiles
+            .FirstOrDefaultAsync(c => c.SocietyId == societyId && c.UserId == actorUserId, ct)
+            ?? throw new AppException("NOT_FOUND", "Aucun profil commercial lié à ce compte.", 404);
+
+        var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
+        return ToProfileDto(profile, societyMemberIds);
+    }
+
     // ── Mutations ─────────────────────────────────────────────────────────
 
-    public async Task<CommercialProfileDto> CreateAsync(
+    public async Task<CreateCommercialResultDto> CreateAsync(
         Guid societyId, Guid actorId, CreateCommercialRequest request, CancellationToken ct = default)
     {
         var employeeId = string.IsNullOrWhiteSpace(request.EmployeeId)
             ? await GenerateEmployeeIdAsync(societyId, ct)
             : request.EmployeeId.Trim();
 
+        var initialPassword = ResolveInitialPassword(request.Password);
+
         // ── Step 1: resolve / create the User account ────────────────────────
         Guid resolvedUserId;
+        var isNewUser = false;
         if (request.UserId.HasValue)
         {
             resolvedUserId = request.UserId.Value;
         }
         else
         {
-            // Reuse an existing account with this e-mail, or create a fresh one.
             var normalizedEmail = request.Email.Trim().ToLowerInvariant();
-            var existingUserId = await _core.Users
-                .Where(u => u.Email == normalizedEmail && !u.IsDeleted)
-                .Select(u => (Guid?)u.Id)
-                .FirstOrDefaultAsync(ct);
+            var existingUser = await _core.Users
+                .FirstOrDefaultAsync(u => u.Email == normalizedEmail && !u.IsDeleted, ct);
 
-            if (existingUserId.HasValue)
+            if (existingUser is not null)
             {
-                resolvedUserId = existingUserId.Value;
+                resolvedUserId = existingUser.Id;
+                if (!string.IsNullOrWhiteSpace(request.Password))
+                {
+                    existingUser.PasswordHash = BCrypt.Net.BCrypt.HashPassword(initialPassword);
+                    existingUser.UpdatedAt = DateTimeOffset.UtcNow;
+                }
             }
             else
             {
+                isNewUser = true;
                 var newUser = new User
                 {
                     Id           = Guid.NewGuid(),
@@ -151,8 +177,7 @@ public sealed class CommercialService : ICommercialService
                     Email        = normalizedEmail,
                     FullName     = $"{request.FirstName} {request.LastName}".Trim(),
                     Phone        = request.Phone,
-                    // Temporary password — commercial must reset it on first login.
-                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("ChangeMe123!"),
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(initialPassword),
                     IsActive     = true,
                 };
                 _core.Users.Add(newUser);
@@ -239,14 +264,21 @@ public sealed class CommercialService : ICommercialService
         await _db.SaveChangesAsync(ct);
 
         var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
-        return ToProfileDto(profile, societyMemberIds);
+        var dto = ToProfileDto(profile, societyMemberIds);
+        var passwordToReturn = isNewUser || !string.IsNullOrWhiteSpace(request.Password)
+            ? initialPassword
+            : null;
+        return new CreateCommercialResultDto(dto, passwordToReturn);
     }
 
     public async Task<CommercialProfileDto> UpdateAsync(
         Guid societyId, Guid actorUserId, Guid id, UpdateCommercialRequest request, CancellationToken ct = default)
     {
-        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
-        var profile = await RequireAsync(societyId, relatedUserIds, id, ct);
+        var viewAll = await CanViewAllCommercialsAsync(societyId, actorUserId, ct);
+        var relatedUserIds = viewAll
+            ? null
+            : await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
+        var profile = await RequireAsync(societyId, viewAll, relatedUserIds, id, ct);
 
         if (request.FirstName  is { } fn) profile.FirstName  = fn;
         if (request.LastName   is { } ln) profile.LastName   = ln;
@@ -275,8 +307,11 @@ public sealed class CommercialService : ICommercialService
     public async Task<CommercialProfileDto> UpdateKpisAndScoreAsync(
         Guid societyId, Guid actorUserId, Guid id, UpdateCommercialKpisRequest kpis, CancellationToken ct = default)
     {
-        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
-        var profile = await RequireAsync(societyId, relatedUserIds, id, ct);
+        var viewAll = await CanViewAllCommercialsAsync(societyId, actorUserId, ct);
+        var relatedUserIds = viewAll
+            ? null
+            : await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
+        var profile = await RequireAsync(societyId, viewAll, relatedUserIds, id, ct);
 
         profile.KpiActivitiesCreated    = kpis.ActivitiesCreated;
         profile.KpiMeetingsParticipated = kpis.MeetingsParticipated;
@@ -288,7 +323,7 @@ public sealed class CommercialService : ICommercialService
         profile.KpiPenalties            = kpis.Penalties;
 
         // Recompute score
-        ComputeAndApplyScore(profile);
+        CommercialProfileScoring.ComputeAndApplyScore(profile);
         profile.ScoredAt  = DateTimeOffset.UtcNow;
         profile.UpdatedAt = DateTimeOffset.UtcNow;
 
@@ -300,14 +335,153 @@ public sealed class CommercialService : ICommercialService
 
     public async Task DeleteAsync(Guid societyId, Guid actorUserId, Guid id, CancellationToken ct = default)
     {
-        var relatedUserIds = await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
-        var profile = await RequireAsync(societyId, relatedUserIds, id, ct);
+        var viewAll = await CanViewAllCommercialsAsync(societyId, actorUserId, ct);
+        var relatedUserIds = viewAll
+            ? null
+            : await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
+        var profile = await RequireAsync(societyId, viewAll, relatedUserIds, id, ct);
         profile.IsDeleted = true;
         profile.UpdatedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
     }
 
+    public async Task<CommercialProfileDto> UpdateAttendanceAsync(
+        Guid societyId,
+        Guid actorUserId,
+        Guid id,
+        UpdateCommercialAttendanceRequest request,
+        CancellationToken ct = default)
+    {
+        var viewAll = await CanViewAllCommercialsAsync(societyId, actorUserId, ct);
+        var relatedUserIds = viewAll
+            ? null
+            : await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
+        var profile = await RequireAsync(societyId, viewAll, relatedUserIds, id, ct);
+
+        profile.AttendancePresentDays = Math.Max(0, request.PresentDays);
+        profile.AttendanceTotalWorkingDays = Math.Max(1, request.TotalWorkingDays);
+        profile.AttendanceAbsentDays = Math.Max(0, request.AbsentDays);
+        profile.AttendanceLateDays = Math.Max(0, request.LateDays);
+        profile.AttendanceHoursWorked = Math.Max(0, request.HoursWorked);
+        profile.AttendanceExpectedHours = Math.Max(1, request.ExpectedHours);
+        profile.AttendancePct = profile.AttendanceTotalWorkingDays > 0
+            ? Math.Round(profile.AttendancePresentDays * 100.0 / profile.AttendanceTotalWorkingDays, 1)
+            : 0;
+
+        CommercialProfileScoring.ComputeAndApplyScore(profile);
+        profile.ScoredAt = DateTimeOffset.UtcNow;
+        profile.UpdatedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
+        return ToProfileDto(profile, societyMemberIds);
+    }
+
+    public async Task<CommercialProfileDto> SyncKpisAsync(
+        Guid societyId, Guid actorUserId, Guid id, CancellationToken ct = default)
+    {
+        var viewAll = await CanViewAllCommercialsAsync(societyId, actorUserId, ct);
+        var relatedUserIds = viewAll
+            ? null
+            : await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
+        await RequireAsync(societyId, viewAll, relatedUserIds, id, ct);
+
+        await _kpiSync.SyncForProfileAsync(societyId, id, ct);
+        var profile = await _db.CommercialProfiles
+            .FirstAsync(c => c.SocietyId == societyId && c.Id == id, ct);
+
+        var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
+        return ToProfileDto(profile, societyMemberIds);
+    }
+
+    public async Task UpdateAccountAsync(
+        Guid societyId,
+        Guid actorUserId,
+        Guid id,
+        UpdateCommercialAccountRequest request,
+        CancellationToken ct = default)
+    {
+        var hasEmail = !string.IsNullOrWhiteSpace(request.Email);
+        var hasPassword = !string.IsNullOrWhiteSpace(request.NewPassword);
+        if (!hasEmail && !hasPassword)
+            throw new AppException("VALIDATION_ERROR", "Email or password is required.", 400);
+
+        if (hasPassword && request.NewPassword!.Trim().Length < 8)
+            throw new AppException("VALIDATION_ERROR", "Password must be at least 8 characters.", 400);
+
+        var viewAll = await CanViewAllCommercialsAsync(societyId, actorUserId, ct);
+        var relatedUserIds = viewAll
+            ? null
+            : await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
+        var profile = await RequireAsync(societyId, viewAll, relatedUserIds, id, ct);
+
+        var user = await _core.Users.FirstOrDefaultAsync(u => u.Id == profile.UserId && !u.IsDeleted, ct)
+            ?? throw new AppException("NOT_FOUND", "User account not found.", 404);
+
+        if (hasEmail)
+        {
+            var normalizedEmail = request.Email!.Trim().ToLowerInvariant();
+            var emailTaken = await _core.Users.AnyAsync(
+                u => u.Email == normalizedEmail && u.Id != user.Id && !u.IsDeleted, ct);
+            if (emailTaken)
+                throw new AppException("EMAIL_ALREADY_EXISTS", "Cet e-mail est déjà utilisé.", 409);
+
+            user.Email = normalizedEmail;
+            user.FullName = $"{profile.FirstName} {profile.LastName}".Trim();
+            profile.Email = request.Email!.Trim();
+        }
+
+        if (hasPassword)
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword!.Trim());
+
+        user.UpdatedAt = DateTimeOffset.UtcNow;
+        profile.UpdatedAt = DateTimeOffset.UtcNow;
+        await _core.SaveChangesAsync(ct);
+        await _db.SaveChangesAsync(ct);
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────
+
+    private static string ResolveInitialPassword(string? requested)
+    {
+        if (!string.IsNullOrWhiteSpace(requested))
+        {
+            var p = requested.Trim();
+            if (p.Length < 8)
+                throw new AppException("VALIDATION_ERROR", "Password must be at least 8 characters.", 400);
+            return p;
+        }
+
+        return $"Pv{Guid.NewGuid():N}"[..12];
+    }
+
+    private static IQueryable<CommercialProfile> ApplyVisibilityFilter(
+        IQueryable<CommercialProfile> q,
+        bool viewAll,
+        HashSet<Guid>? relatedUserIds)
+    {
+        if (viewAll || relatedUserIds is null)
+            return q;
+
+        return q.Where(c =>
+            (c.CreatedById.HasValue && relatedUserIds.Contains(c.CreatedById.Value))
+            || relatedUserIds.Contains(c.UserId));
+    }
+
+    private async Task<bool> CanViewAllCommercialsAsync(Guid societyId, Guid actorUserId, CancellationToken ct)
+    {
+        var roleTypes = await (
+            from us in _core.UserSocieties.AsNoTracking()
+            join r in _core.Roles.AsNoTracking() on us.RoleId equals r.Id
+            where us.SocietyId == societyId
+                && us.UserId == actorUserId
+                && !us.IsDeleted
+                && !r.IsDeleted
+            select r.RoleType
+        ).ToListAsync(ct);
+
+        return roleTypes.Any(rt => rt is RoleType.Admin or RoleType.Manager);
+    }
 
     private async Task<HashSet<Guid>> GetSocietyMemberUserIdsAsync(Guid societyId, CancellationToken ct)
     {
@@ -323,14 +497,23 @@ public sealed class CommercialService : ICommercialService
 
     private async Task<CommercialProfile> RequireAsync(
         Guid societyId,
-        HashSet<Guid> relatedUserIds,
+        bool viewAll,
+        HashSet<Guid>? relatedUserIds,
         Guid id,
         CancellationToken ct)
     {
+        if (viewAll)
+        {
+            return await _db.CommercialProfiles
+                .FirstOrDefaultAsync(c => c.SocietyId == societyId && c.Id == id, ct)
+                ?? throw new AppException("NOT_FOUND", $"Commercial profile {id} not found.", 404);
+        }
+
         return await _db.CommercialProfiles
             .FirstOrDefaultAsync(
                 c => c.SocietyId == societyId
                     && c.Id == id
+                    && relatedUserIds != null
                     && ((c.CreatedById.HasValue && relatedUserIds.Contains(c.CreatedById.Value))
                         || relatedUserIds.Contains(c.UserId)), ct)
             ?? throw new AppException("NOT_FOUND", $"Commercial profile {id} not found.", 404);
@@ -400,49 +583,10 @@ public sealed class CommercialService : ICommercialService
     }
 
     /// <summary>
-    /// Scoring algorithm (mirrors the Angular service logic).
-    /// Max contribution per dimension:
-    ///   Activities  : 20 pts (benchmark = 40 / month)
-    ///   Meetings    : 20 pts (benchmark = 15 / month)
-    ///   Leads       : 15 pts (benchmark = 30 leads)
-    ///   Deals       : 25 pts (benchmark = 8 won)
-    ///   Attendance  : 15 pts (= attendance% × 0.15)
-    ///   Penalties   : -5 per penalty (min -15)
-    /// Total clipped to [0, 100].
+    /// Scoring algorithm — see <see cref="CommercialProfileScoring"/>.
     /// </summary>
-    private static void ComputeAndApplyScore(CommercialProfile p)
-    {
-        const double maxAct  = 40, maxMeet = 15, maxLead = 30, maxDeal = 8;
-
-        double act  = Math.Min(20, (p.KpiActivitiesCreated    / maxAct)  * 20);
-        double meet = Math.Min(20, (p.KpiMeetingsParticipated / maxMeet) * 20);
-        double lead = Math.Min(15, (p.KpiLeadsAssigned        / maxLead) * 15);
-        double deal = Math.Min(25, (p.KpiDealsWon             / maxDeal) * 25);
-        double att  = (p.AttendancePct / 100.0) * 15;
-        double pen  = Math.Max(-15, p.KpiPenalties * -5.0);
-
-        int previousTotal = p.ScoreTotal;
-        int newTotal = (int)Math.Clamp(Math.Round(act + meet + lead + deal + att + pen), 0, 100);
-
-        p.ScoreActivities = Math.Round(act,  1);
-        p.ScoreMeetings   = Math.Round(meet, 1);
-        p.ScoreLeads      = Math.Round(lead, 1);
-        p.ScoreDeals      = Math.Round(deal, 1);
-        p.ScoreAttendance = Math.Round(att,  1);
-        p.ScorePenalties  = pen;
-
-        p.ScoreTotal = newTotal;
-        p.ScoreTier  = newTotal >= 80 ? CommercialScoreTiers.Top
-                     : newTotal >= 65 ? CommercialScoreTiers.Good
-                     : newTotal >= 50 ? CommercialScoreTiers.Average
-                     : CommercialScoreTiers.Low;
-
-        int delta = newTotal - previousTotal;
-        p.ScoreTrendValue = delta;
-        p.ScoreTrend      = delta >  2 ? "up"
-                          : delta < -1 ? "down"
-                          : "stable";
-    }
+    private static void ComputeAndApplyScore(CommercialProfile p) =>
+        CommercialProfileScoring.ComputeAndApplyScore(p);
 
     // ── Projection helpers ────────────────────────────────────────────────
 
@@ -478,7 +622,7 @@ public sealed class CommercialService : ICommercialService
 
     private static CommercialListItemDto ToListDto(CommercialProfile c, HashSet<Guid> societyMemberIds) => new(
         Id:            c.Id,
-        UserId:        societyMemberIds.Contains(c.UserId) ? c.UserId : null,
+        UserId:        c.UserId,
         EmployeeId:    c.EmployeeId,
         FirstName:     c.FirstName,
         LastName:      c.LastName,
@@ -499,7 +643,7 @@ public sealed class CommercialService : ICommercialService
 
     private static CommercialProfileDto ToProfileDto(CommercialProfile c, HashSet<Guid> societyMemberIds) => new(
         Id:            c.Id,
-        UserId:        societyMemberIds.Contains(c.UserId) ? c.UserId : null,
+        UserId:        c.UserId,
         EmployeeId:    c.EmployeeId,
         FirstName:     c.FirstName,
         LastName:      c.LastName,
