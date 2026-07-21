@@ -41,10 +41,16 @@ public sealed class CommercialService : ICommercialService
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
             var s = query.Search.Trim().ToLower();
+            var matchingUserIds = await _core.Users.AsNoTracking()
+                .Where(u => !u.IsDeleted && (
+                    u.FullName.ToLower().Contains(s) ||
+                    u.Email.ToLower().Contains(s) ||
+                    (u.Phone != null && u.Phone.ToLower().Contains(s))))
+                .Select(u => u.Id)
+                .ToListAsync(ct);
+
             q = q.Where(c =>
-                c.FirstName.ToLower().Contains(s) ||
-                c.LastName.ToLower().Contains(s) ||
-                c.Email.ToLower().Contains(s) ||
+                matchingUserIds.Contains(c.UserId) ||
                 c.EmployeeId.ToLower().Contains(s) ||
                 c.Position.ToLower().Contains(s) ||
                 c.Department.ToLower().Contains(s));
@@ -70,12 +76,13 @@ public sealed class CommercialService : ICommercialService
         var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
         var profiles = await q
             .OrderByDescending(c => c.ScoreTotal)
-            .ThenBy(c => c.LastName)
+            .ThenBy(c => c.EmployeeId)
             .Skip((page - 1) * size)
             .Take(size)
             .ToListAsync(ct);
 
-        var items = profiles.ConvertAll(c => ToListDto(c, societyMemberIds));
+        var users = await LoadUsersByIdsAsync(profiles.Select(c => c.UserId), ct);
+        var items = profiles.ConvertAll(c => ToListDto(c, users.GetValueOrDefault(c.UserId), societyMemberIds));
 
         return (items, new CommercialPageMeta(page, size, total, pages));
     }
@@ -92,7 +99,8 @@ public sealed class CommercialService : ICommercialService
         c = await _db.CommercialProfiles.FirstAsync(x => x.SocietyId == societyId && x.Id == id, ct);
 
         var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
-        return ToProfileDto(c, societyMemberIds);
+        var user = await LoadUserAsync(c.UserId, ct);
+        return ToProfileDto(c, user, societyMemberIds);
     }
 
     public async Task<CommercialStatsDto> GetStatsAsync(Guid societyId, Guid actorUserId, CancellationToken ct = default)
@@ -149,7 +157,10 @@ public sealed class CommercialService : ICommercialService
         var isNewUser = false;
         if (request.UserId.HasValue)
         {
-            resolvedUserId = request.UserId.Value;
+            linkedUser = await _core.Users
+                .FirstOrDefaultAsync(u => u.Id == request.UserId.Value && !u.IsDeleted, ct)
+                ?? throw new AppException("USER_NOT_FOUND", "Compte utilisateur introuvable.", 404);
+            resolvedUserId = linkedUser.Id;
         }
         else
         {
@@ -175,15 +186,25 @@ public sealed class CommercialService : ICommercialService
                     CreatedAt    = DateTimeOffset.UtcNow,
                     CreatedById  = actorId,
                     Email        = normalizedEmail,
-                    FullName     = $"{request.FirstName} {request.LastName}".Trim(),
+                    FullName     = BuildFullName(request.FirstName, request.LastName),
                     Phone        = request.Phone,
                     PasswordHash = BCrypt.Net.BCrypt.HashPassword(initialPassword),
                     IsActive     = true,
                 };
-                _core.Users.Add(newUser);
-                resolvedUserId = newUser.Id;
+                _core.Users.Add(linkedUser);
             }
+            else
+            {
+                linkedUser = existingUser;
+            }
+
+            resolvedUserId = linkedUser.Id;
         }
+
+        ApplyUserIdentity(linkedUser, request.FirstName, request.LastName, request.Phone);
+        if (!request.UserId.HasValue)
+            linkedUser.Email = request.Email.Trim().ToLowerInvariant();
+        linkedUser.UpdatedAt = DateTimeOffset.UtcNow;
 
         // ── Step 2: ensure UserSociety (Commercial role) ─────────────────────
         var alreadyMember = await _core.UserSocieties
@@ -219,10 +240,9 @@ public sealed class CommercialService : ICommercialService
                 SocietyId = societyId,
                 RoleId    = commercialRole.Id,
             });
-
-            // Save user-account changes to the core DB before inserting the profile.
-            await _core.SaveChangesAsync(ct);
         }
+
+        await _core.SaveChangesAsync(ct);
 
         // ── Step 3: guard against duplicate profile for the same user ────────
         var userAlreadyLinked = await _db.CommercialProfiles
@@ -238,10 +258,6 @@ public sealed class CommercialService : ICommercialService
             CreatedAt  = DateTimeOffset.UtcNow,
             UserId     = resolvedUserId,
             EmployeeId = employeeId,
-            FirstName  = request.FirstName,
-            LastName   = request.LastName,
-            Email      = request.Email,
-            Phone      = request.Phone,
             DateOfBirth = request.DateOfBirth,
             Address    = request.Address,
             City       = request.City,
@@ -280,9 +296,22 @@ public sealed class CommercialService : ICommercialService
             : await GetRelatedUserIdsAsync(societyId, actorUserId, ct);
         var profile = await RequireAsync(societyId, viewAll, relatedUserIds, id, ct);
 
-        if (request.FirstName  is { } fn) profile.FirstName  = fn;
-        if (request.LastName   is { } ln) profile.LastName   = ln;
-        if (request.Phone      is { } ph) profile.Phone      = ph;
+        var user = await _core.Users
+            .FirstOrDefaultAsync(u => u.Id == profile.UserId && !u.IsDeleted, ct)
+            ?? throw new AppException("USER_NOT_FOUND", "Compte utilisateur introuvable.", 404);
+
+        if (request.FirstName is not null || request.LastName is not null || request.Phone is not null)
+        {
+            var identity = SplitFullName(user.FullName);
+            ApplyUserIdentity(
+                user,
+                request.FirstName ?? identity.FirstName,
+                request.LastName  ?? identity.LastName,
+                request.Phone     ?? user.Phone);
+            user.UpdatedAt = DateTimeOffset.UtcNow;
+            await _core.SaveChangesAsync(ct);
+        }
+
         if (request.DateOfBirth is { } db) profile.DateOfBirth = db;
         if (request.Address    is { } ad) profile.Address    = ad;
         if (request.City       is { } cy) profile.City       = cy;
@@ -301,7 +330,7 @@ public sealed class CommercialService : ICommercialService
         await _db.SaveChangesAsync(ct);
 
         var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
-        return ToProfileDto(profile, societyMemberIds);
+        return ToProfileDto(profile, user, societyMemberIds);
     }
 
     public async Task<CommercialProfileDto> UpdateKpisAndScoreAsync(
@@ -330,7 +359,8 @@ public sealed class CommercialService : ICommercialService
         await _db.SaveChangesAsync(ct);
 
         var societyMemberIds = await GetSocietyMemberUserIdsAsync(societyId, ct);
-        return ToProfileDto(profile, societyMemberIds);
+        var user = await LoadUserAsync(profile.UserId, ct);
+        return ToProfileDto(profile, user, societyMemberIds);
     }
 
     public async Task DeleteAsync(Guid societyId, Guid actorUserId, Guid id, CancellationToken ct = default)
@@ -581,6 +611,58 @@ public sealed class CommercialService : ICommercialService
 
         return $"{prefix}{next:000}";
     }
+
+    private async Task<User?> LoadUserAsync(Guid userId, CancellationToken ct) =>
+        await _core.Users.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == userId && !u.IsDeleted, ct);
+
+    private async Task<IReadOnlyDictionary<Guid, User>> LoadUsersByIdsAsync(
+        IEnumerable<Guid> userIds, CancellationToken ct)
+    {
+        var ids = userIds.Distinct().ToList();
+        if (ids.Count == 0)
+            return new Dictionary<Guid, User>();
+
+        return await _core.Users.AsNoTracking()
+            .Where(u => ids.Contains(u.Id) && !u.IsDeleted)
+            .ToDictionaryAsync(u => u.Id, ct);
+    }
+
+    private static (string FirstName, string LastName) SplitFullName(string fullName)
+    {
+        var trimmed = fullName.Trim();
+        if (trimmed.Length == 0)
+            return ("", "");
+
+        var space = trimmed.IndexOf(' ');
+        return space < 0
+            ? (trimmed, "")
+            : (trimmed[..space], trimmed[(space + 1)..].Trim());
+    }
+
+    private static string BuildFullName(string firstName, string lastName) =>
+        $"{firstName} {lastName}".Trim();
+
+    private static void ApplyUserIdentity(User user, string firstName, string lastName, string? phone)
+    {
+        user.FullName = BuildFullName(firstName, lastName);
+        user.Phone    = phone;
+    }
+
+    private static CommercialUserIdentity GetIdentity(User? user)
+    {
+        if (user is null)
+            return new CommercialUserIdentity("", "", "", null);
+
+        var (firstName, lastName) = SplitFullName(user.FullName);
+        return new CommercialUserIdentity(firstName, lastName, user.Email, user.Phone);
+    }
+
+    private sealed record CommercialUserIdentity(
+        string FirstName,
+        string LastName,
+        string Email,
+        string? Phone);
 
     /// <summary>
     /// Scoring algorithm — see <see cref="CommercialProfileScoring"/>.

@@ -383,10 +383,6 @@ public sealed class AppDbContext : DbContext
               .HasDatabaseName("IX_CommercialProfiles_SocietyId_UserId");
             b.HasIndex(x => new { x.SocietyId, x.EmployeeId }).IsUnique()
               .HasDatabaseName("IX_CommercialProfiles_SocietyId_EmployeeId");
-            b.Property(x => x.FirstName).HasMaxLength(100);
-            b.Property(x => x.LastName).HasMaxLength(100);
-            b.Property(x => x.Email).HasMaxLength(200);
-            b.Property(x => x.Phone).HasMaxLength(30);
             b.Property(x => x.EmployeeId).HasMaxLength(50);
             b.Property(x => x.Department).HasMaxLength(120);
             b.Property(x => x.Position).HasMaxLength(120);
@@ -427,10 +423,6 @@ public sealed class AppDbContext : DbContext
               .HasDatabaseName("IX_TechnicienProfiles_SocietyId_UserId");
             b.HasIndex(x => new { x.SocietyId, x.EmployeeId }).IsUnique()
               .HasDatabaseName("IX_TechnicienProfiles_SocietyId_EmployeeId");
-            b.Property(x => x.FirstName).HasMaxLength(100);
-            b.Property(x => x.LastName).HasMaxLength(100);
-            b.Property(x => x.Email).HasMaxLength(200);
-            b.Property(x => x.Phone).HasMaxLength(30);
             b.Property(x => x.EmployeeId).HasMaxLength(50);
             b.Property(x => x.Department).HasMaxLength(120);
             b.Property(x => x.Position).HasMaxLength(120);

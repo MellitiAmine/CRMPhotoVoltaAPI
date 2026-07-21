@@ -64,6 +64,13 @@ public interface IInstallationWorkflowService
 
     Task DeletePhotoAsync(
         Guid societyId, Guid installationId, Guid photoId, CancellationToken cancellationToken = default);
+
+    /// <summary>Planning view — all technicians (admin) or scoped to one technician.</summary>
+    Task<InstallationPlanningDto> GetPlanningAsync(
+        Guid societyId,
+        InstallationPlanningQuery query,
+        Guid? restrictToTechnicianUserId = null,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class InstallationListItemDto
@@ -158,4 +165,48 @@ public sealed class InitializeInstallationChecklistRequest
 {
     /// <summary>Custom labels; uses society defaults when empty.</summary>
     public IReadOnlyList<string>? Items { get; init; }
+}
+
+public sealed record InstallationPlanningQuery(
+    DateOnly? From = null,
+    DateOnly? To = null,
+    Guid? TechnicianId = null,
+    InstallationStatus? Status = null);
+
+public sealed class InstallationPlanningItemDto
+{
+    public Guid Id { get; init; }
+    public Guid ProjectId { get; init; }
+    public string? ProjectReference { get; init; }
+    public string ProjectName { get; init; } = string.Empty;
+    public string ClientName { get; init; } = string.Empty;
+    public string? Address { get; init; }
+    public Guid TechnicianId { get; init; }
+    public string? TechnicianName { get; init; }
+    public DateOnly Date { get; init; }
+    public InstallationStatus Status { get; init; }
+    public int ChecklistCompleted { get; init; }
+    public int ChecklistTotal { get; init; }
+    public DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset? UpdatedAt { get; init; }
+}
+
+public sealed class TechnicianPlanningSummaryDto
+{
+    public Guid TechnicianId { get; init; }
+    public string? TechnicianName { get; init; }
+    public int TotalCount { get; init; }
+    public int ScheduledCount { get; init; }
+    public int InProgressCount { get; init; }
+    public int CompletedCount { get; init; }
+}
+
+public sealed class InstallationPlanningDto
+{
+    public DateOnly From { get; init; }
+    public DateOnly To { get; init; }
+    public bool IsPersonalView { get; init; }
+    public Guid? TechnicianId { get; init; }
+    public IReadOnlyList<InstallationPlanningItemDto> Items { get; init; } = Array.Empty<InstallationPlanningItemDto>();
+    public IReadOnlyList<TechnicianPlanningSummaryDto> Technicians { get; init; } = Array.Empty<TechnicianPlanningSummaryDto>();
 }
